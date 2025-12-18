@@ -96,20 +96,23 @@ Build an installable Python package that provides semantic code search over loca
 lance-code-mcp/
 ├── pyproject.toml              # Package config, entry point: lcm
 ├── README.md
-├── LICENSE
-├── install.sh                  # curl installer
-└── src/lance_code_mcp/
-    ├── __init__.py
-    ├── cli.py                  # CLI commands (lcm)
-    ├── server.py               # MCP server
-    ├── indexer.py              # Orchestrates indexing pipeline
-    ├── chunker.py              # Tree-sitter parsing
-    ├── embeddings.py           # Local/Gemini/OpenAI providers
-    ├── search.py               # Hybrid + fuzzy search
-    ├── watcher.py              # File watching (optional)
-    ├── merkle.py               # Merkle tree for change detection
-    ├── manifest.py             # Manifest file I/O
-    └── config.py               # Configuration management
+├── PLAN.md                     # This file
+├── src/lance_code_mcp/
+│   ├── __init__.py             # Package constants (LCM_DIR, etc.)
+│   ├── cli.py                  # CLI commands (lcm) ✅
+│   ├── config.py               # Configuration management ✅
+│   ├── manifest.py             # Manifest file I/O ✅
+│   ├── server.py               # MCP server (stub)
+│   ├── indexer.py              # Orchestrates indexing pipeline (stub)
+│   ├── chunker.py              # Tree-sitter parsing (stub)
+│   ├── embeddings.py           # Local/Gemini/OpenAI providers (stub)
+│   ├── search.py               # Hybrid + fuzzy search (stub)
+│   ├── watcher.py              # File watching (stub)
+│   └── merkle.py               # Merkle tree for change detection (stub)
+└── tests/
+    ├── conftest.py             # Shared fixtures
+    ├── fixtures/sample_project/ # Test codebase (Python, JS)
+    └── integration/test_cli.py  # P0 integration tests
 ```
 
 ## Module Specifications
@@ -830,16 +833,35 @@ Created by `lcm init`:
 
 ## Implementation Order
 
-### Phase 1: Core Setup
-- Package structure with pyproject.toml
-- CLI skeleton with click (`lcm` command)
-- Config and manifest modules
-- Basic logging
+### Phase 1: Core Setup ✅ COMPLETE
+- [x] Package structure with pyproject.toml (hatchling build backend)
+- [x] CLI skeleton with click (`lcm` command)
+- [x] Config module with Pydantic models (`config.py`)
+- [x] Manifest module with Pydantic models (`manifest.py`)
+- [x] All CLI commands: init, index, status, search, serve, clean
+- [x] Environment variable overrides (LCM_EMBEDDING_PROVIDER, LCM_EMBEDDING_MODEL)
+- [x] Test infrastructure with fixture codebase
+
+**Implemented files:**
+- `src/lance_code_mcp/__init__.py` - Package constants
+- `src/lance_code_mcp/cli.py` - Full CLI implementation
+- `src/lance_code_mcp/config.py` - Pydantic config with env overrides
+- `src/lance_code_mcp/manifest.py` - Pydantic manifest I/O
+- `src/lance_code_mcp/{server,indexer,chunker,embeddings,search,watcher,merkle}.py` - Stubs
+
+**Test structure:**
+```
+tests/
+├── conftest.py                    # cli_runner, sample_project fixtures
+├── fixtures/sample_project/       # Curated test codebase (Python, JS)
+└── integration/test_cli.py        # 8 P0 integration tests
+```
 
 ### Phase 2: Indexing Pipeline
 - Tree-sitter chunker (Python first, then others)
 - Local embedding provider
 - LanceDB storage with FTS index
+- Merkle tree implementation
 - Manifest/hash tracking
 - Incremental indexing logic
 

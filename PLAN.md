@@ -109,7 +109,7 @@ lance-code-mcp/
 │   ├── chunker.py              # Tree-sitter parsing ✅
 │   ├── embeddings.py           # Local embedding provider ✅
 │   ├── storage.py              # LanceDB wrapper ✅
-│   ├── search.py               # Hybrid + fuzzy search (stub)
+│   ├── search.py               # Hybrid + fuzzy search ✅
 │   ├── watcher.py              # File watching (stub)
 │   └── merkle.py               # Merkle tree for change detection ✅
 └── tests/
@@ -118,7 +118,8 @@ lance-code-mcp/
     └── integration/
         ├── test_cli.py         # CLI integration tests (8 tests)
         ├── test_indexing.py    # Indexing integration tests (7 tests)
-        └── test_merkle.py      # Merkle tree tests (23 tests)
+        ├── test_merkle.py      # Merkle tree tests (23 tests)
+        └── test_search.py      # Search integration tests (12 tests)
 ```
 
 ## Module Specifications
@@ -891,21 +892,27 @@ tests/
 - Embedding cache: Content-addressed by chunk hash, avoids re-embedding unchanged code
 - mtime cache: Reuses file hashes when mtime+size unchanged, reduces I/O on incremental scans
 
-### Phase 3: Search ← NEXT
-- [ ] Vector search using LanceDB
-- [ ] BM25 full-text search using LanceDB FTS
-- [ ] Hybrid search combining vector + BM25
-- [ ] Fuzzy search for symbol names (typo tolerance)
-- [ ] Reranking (RRF or linear combination)
-- [ ] `lcm search` CLI command implementation
-- [ ] Search result formatting with file context
-- [ ] Integration tests for search
+### Phase 3: Search ✅ COMPLETE
+- [x] Vector search using LanceDB
+- [x] BM25 full-text search using LanceDB FTS
+- [x] Hybrid search combining vector + BM25 with RRF reranking
+- [x] Fuzzy search for symbol names (typo tolerance using SequenceMatcher)
+- [x] Reranking (Reciprocal Rank Fusion)
+- [x] `lcm search` CLI command implementation
+- [x] Search result formatting with Rich syntax highlighting
+- [x] Integration tests for search (12 tests)
 
-**Files to implement:**
-- `src/lance_code_mcp/search.py` - Search engine (replace stub)
-- `tests/integration/test_search.py` - Search integration tests
+**Implemented files:**
+- `src/lance_code_mcp/search.py` - SearchEngine class with vector, FTS, hybrid, fuzzy search
+- `tests/integration/test_search.py` - 12 search integration tests
 
-### Phase 4: MCP Server
+**Key features:**
+- Lazy FTS index creation (created on first search, not during indexing)
+- RRF reranking for hybrid search (no score normalization needed)
+- Fuzzy search on symbol names using SequenceMatcher
+- CLI options: `--fuzzy`, `--bm25-weight`, `-n/--num-results`
+
+### Phase 4: MCP Server ← NEXT
 - FastMCP server setup
 - All tools implementation
 - Resources and prompts

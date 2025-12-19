@@ -173,23 +173,84 @@ def status() -> None:
 @main.command()
 @click.argument("query")
 @click.option("-n", "--num-results", default=10, help="Number of results to return")
-@click.option("--fuzzy", is_flag=True, help="Enable fuzzy matching")
+@click.option("--fuzzy", is_flag=True, help="Enable fuzzy matching for symbol names")
 @click.option(
     "--bm25-weight",
     type=float,
     default=0.5,
-    help="Weight for BM25 vs semantic search (0.0-1.0)",
+    help="Weight for BM25 vs semantic search (0.0=pure semantic, 1.0=pure keyword)",
 )
 def search(query: str, num_results: int, fuzzy: bool, bm25_weight: float) -> None:
     """Search the codebase."""
+    from .search import SearchError, run_search
+
     project_root = get_project_root()
     require_initialized(project_root)
 
-    console.print("[yellow]Not implemented yet.[/yellow] Coming in Phase 3.")
-    console.print(f"  query: {query}")
-    console.print(f"  num_results: {num_results}")
-    console.print(f"  fuzzy: {fuzzy}")
-    console.print(f"  bm25_weight: {bm25_weight}")
+    try:
+        results = run_search(
+            project_root=project_root,
+            query=query,
+            limit=num_results,
+            fuzzy=fuzzy,
+            bm25_weight=bm25_weight,
+        )
+        _display_search_results(results, console)
+    except SearchError as e:
+        error_console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+
+
+def _display_search_results(results, console: Console) -> None:
+    """Display search results with formatting."""
+    from rich.syntax import Syntax
+
+    if not results.results:
+        console.print("[yellow]No results found.[/yellow]")
+        return
+
+    console.print(f"\n[bold]Search results for:[/bold] {results.query}")
+    console.print(
+        f"[dim]Found {len(results.results)} results in {results.elapsed_ms:.0f}ms "
+        f"(search type: {results.search_type})[/dim]\n"
+    )
+
+    type_colors = {
+        "function": "green",
+        "class": "blue",
+        "method": "cyan",
+        "module": "yellow",
+    }
+
+    for i, result in enumerate(results.results, 1):
+        color = type_colors.get(result.type, "white")
+
+        # Header line
+        header = f"[bold]{i}.[/bold] [{color}]{result.type}[/{color}]"
+        if result.name:
+            header += f" [bold]{result.name}[/bold]"
+        header += f" [dim](score: {result.score:.3f})[/dim]"
+        console.print(header)
+
+        # File location
+        console.print(
+            f"   [dim]{result.filepath}:{result.start_line}-{result.end_line}[/dim]"
+        )
+
+        # Code preview (first 3 lines)
+        lines = result.text.split("\n")[:3]
+        preview = "\n".join(lines)
+        if len(result.text.split("\n")) > 3:
+            preview += "\n..."
+
+        # Detect language from filepath
+        ext = result.filepath.rsplit(".", 1)[-1] if "." in result.filepath else "text"
+        lang_map = {"py": "python", "js": "javascript", "ts": "typescript", "tsx": "typescript"}
+        lang = lang_map.get(ext, ext)
+
+        syntax = Syntax(preview, lang, theme="monokai", line_numbers=False)
+        console.print(Panel(syntax, border_style="dim"))
+        console.print()
 
 
 @main.command()

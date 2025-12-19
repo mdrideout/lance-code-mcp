@@ -99,18 +99,44 @@ def init(embedding: Literal["local", "gemini", "openai"], force: bool) -> None:
 
 
 @main.command()
-@click.option("--watch", is_flag=True, help="Watch for file changes after indexing")
+@click.option("--watch", is_flag=True, help="Watch for file changes after indexing (Phase 5)")
 @click.option("--force", is_flag=True, help="Force full re-index")
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
 def index(watch: bool, force: bool, verbose: bool) -> None:
     """Index the codebase for semantic search."""
+    from .indexer import run_index
+
     project_root = get_project_root()
     require_initialized(project_root)
 
-    console.print("[yellow]Not implemented yet.[/yellow] Coming in Phase 2.")
-    console.print(f"  --watch: {watch}")
-    console.print(f"  --force: {force}")
-    console.print(f"  --verbose: {verbose}")
+    if watch:
+        console.print("[yellow]--watch not implemented yet.[/yellow] Coming in Phase 5.")
+        return
+
+    console.print("[bold]Indexing codebase...[/bold]")
+
+    stats = run_index(project_root, force=force, verbose=verbose, console=console)
+
+    # Display results
+    table = Table(title="Indexing Complete")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Count", justify="right")
+
+    table.add_row("Files scanned", str(stats.files_scanned))
+    table.add_row("New files", str(stats.files_new))
+    table.add_row("Modified files", str(stats.files_modified))
+    table.add_row("Deleted files", str(stats.files_deleted))
+    table.add_row("Chunks indexed", str(stats.chunks_added))
+    table.add_row("Chunks removed", str(stats.chunks_deleted))
+    table.add_row("Embeddings computed", str(stats.embeddings_computed))
+    table.add_row("Embeddings from cache", str(stats.embeddings_cached))
+
+    console.print(table)
+
+    if stats.files_new == 0 and stats.files_modified == 0 and stats.files_deleted == 0:
+        console.print("[green]Index is up to date.[/green]")
+    else:
+        console.print("[green]Indexing complete![/green]")
 
 
 @main.command()

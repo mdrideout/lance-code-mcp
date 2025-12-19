@@ -857,13 +857,23 @@ tests/
 └── integration/test_cli.py        # 8 P0 integration tests
 ```
 
-### Phase 2: Indexing Pipeline
-- Tree-sitter chunker (Python first, then others)
-- Local embedding provider
-- LanceDB storage with FTS index
-- Merkle tree implementation
-- Manifest/hash tracking
-- Incremental indexing logic
+### Phase 2: Indexing Pipeline ✅ COMPLETE
+- [x] Tree-sitter chunker (Python first)
+- [x] Local embedding provider (sentence-transformers, BAAI/bge-base-en-v1.5)
+- [x] LanceDB storage with code_chunks and embedding_cache tables
+- [x] Merkle tree implementation for change detection
+- [x] Manifest/hash tracking
+- [x] Incremental indexing logic
+- [x] `lcm index` command with --force and --verbose flags
+- [x] Integration tests for indexing
+
+**Implemented files:**
+- `src/lance_code_mcp/merkle.py` - Merkle tree (MerkleNode, MerkleTree, TreeDiff)
+- `src/lance_code_mcp/storage.py` - LanceDB wrapper (CodeChunk, CachedEmbedding, Storage)
+- `src/lance_code_mcp/chunker.py` - Tree-sitter parsing (Chunk, Chunker)
+- `src/lance_code_mcp/embeddings.py` - Local embeddings (EmbeddingProvider, LocalEmbeddingProvider)
+- `src/lance_code_mcp/indexer.py` - Pipeline orchestration (IndexStats, Indexer, run_index)
+- `tests/integration/test_indexing.py` - 7 P0 integration tests
 
 ### Phase 3: Search
 - Hybrid search (vector + BM25)

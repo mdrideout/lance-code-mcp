@@ -254,17 +254,20 @@ def _display_search_results(results, console: Console) -> None:
 
 
 @main.command()
-@click.option("--port", default=None, type=int, help="Port for HTTP transport (default: stdio)")
+@click.option("--port", default=None, type=int, help="Port for SSE transport (default: stdio)")
 def serve(port: int | None) -> None:
     """Start the MCP server."""
+    from .server import run_server
+
     project_root = get_project_root()
     require_initialized(project_root)
 
-    console.print("[yellow]Not implemented yet.[/yellow] Coming in Phase 4.")
     if port:
-        console.print(f"  port: {port}")
+        console.print(f"[bold]Starting MCP server on port {port}...[/bold]")
     else:
-        console.print("  transport: stdio")
+        console.print("[bold]Starting MCP server (stdio)...[/bold]")
+
+    run_server(project_root, port=port)
 
 
 @main.command()

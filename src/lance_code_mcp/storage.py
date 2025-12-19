@@ -185,10 +185,10 @@ class Storage:
         """Get all unique filepaths in the index."""
         table = self._get_chunks_table()
         try:
-            df = table.to_pandas()
-            if "filepath" in df.columns:
-                return set(df["filepath"].unique())
-            return set()
+            arrow_table = table.to_arrow()
+            if arrow_table.num_rows == 0:
+                return set()
+            return set(arrow_table.column("filepath").to_pylist())
         except Exception:
             return set()
 

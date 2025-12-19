@@ -139,14 +139,31 @@ class Indexer:
         Returns:
             Tuple of (new_tree, diff)
         """
-        # Build current tree from filesystem
+        # Load existing tree from manifest first (for mtime optimization)
+        manifest = load_manifest(self.project_root)
+        old_tree: MerkleTree | None = None
+        if manifest is not None and manifest.tree is not None:
+            old_tree = MerkleTree.from_dict(manifest.tree)
+
+        # Build current tree from filesystem, using previous tree for mtime caching
         new_tree = MerkleTree.build(
             self.project_root,
             self.config.extensions,
             self.config.exclude_patterns,
+            previous_tree=old_tree if not force else None,
         )
 
-        if force:
+        # Log mtime cache stats if verbose
+        if self.verbose and new_tree.build_stats:
+            stats = new_tree.build_stats
+            if stats.total_files > 0:
+                self.console.print(
+                    f"[dim]Tree build: {stats.files_hashed} hashed, "
+                    f"{stats.files_mtime_cached} cached "
+                    f"({stats.cache_hit_rate:.0%} hit rate)[/dim]"
+                )
+
+        if force or old_tree is None:
             # Treat all files as new
             diff = TreeDiff()
             if new_tree.root:
@@ -154,17 +171,6 @@ class Indexer:
                 _collect_all_files(new_tree.root, diff.new)
             return new_tree, diff
 
-        # Load existing tree from manifest
-        manifest = load_manifest(self.project_root)
-        if manifest is None or manifest.tree is None:
-            # No existing tree - everything is new
-            diff = TreeDiff()
-            if new_tree.root:
-                from .merkle import _collect_all_files
-                _collect_all_files(new_tree.root, diff.new)
-            return new_tree, diff
-
-        old_tree = MerkleTree.from_dict(manifest.tree)
         diff = old_tree.compare(new_tree)
         return new_tree, diff
 

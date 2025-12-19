@@ -10,6 +10,25 @@ from typing import Any, Literal
 
 
 @dataclass
+class TreeBuildStats:
+    """Statistics from building a Merkle tree."""
+
+    files_hashed: int = 0  # Files where content was read and hashed
+    files_mtime_cached: int = 0  # Files where hash was reused due to mtime match
+    directories_processed: int = 0
+
+    @property
+    def total_files(self) -> int:
+        return self.files_hashed + self.files_mtime_cached
+
+    @property
+    def cache_hit_rate(self) -> float:
+        if self.total_files == 0:
+            return 0.0
+        return self.files_mtime_cached / self.total_files
+
+
+@dataclass
 class MerkleNode:
     """A node in the Merkle tree representing a file or directory."""
 
@@ -79,6 +98,7 @@ class MerkleTree:
 
     def __init__(self, root: MerkleNode | None = None):
         self.root = root
+        self.build_stats: TreeBuildStats | None = None
 
     @classmethod
     def build(
@@ -86,6 +106,7 @@ class MerkleTree:
         project_root: Path,
         extensions: list[str],
         exclude_patterns: list[str],
+        previous_tree: MerkleTree | None = None,
     ) -> MerkleTree:
         """
         Build a Merkle tree from the filesystem.
@@ -94,17 +115,29 @@ class MerkleTree:
             project_root: Root directory to scan
             extensions: File extensions to include (e.g., [".py", ".js"])
             exclude_patterns: Directory/file patterns to exclude
+            previous_tree: Optional previous tree for mtime-based hash caching
 
         Returns:
             A MerkleTree instance with computed hashes
         """
+        # Build lookup table from previous tree for O(1) path lookups
+        previous_nodes: dict[str, MerkleNode] = {}
+        if previous_tree and previous_tree.root:
+            _build_path_lookup(previous_tree.root, previous_nodes)
+
+        stats = TreeBuildStats()
         root_node = _build_node(
-            project_root,
-            project_root,
-            extensions,
-            exclude_patterns,
+            path=project_root,
+            project_root=project_root,
+            extensions=extensions,
+            exclude_patterns=exclude_patterns,
+            previous_nodes=previous_nodes,
+            stats=stats,
         )
-        return cls(root=root_node)
+
+        tree = cls(root=root_node)
+        tree.build_stats = stats
+        return tree
 
     def compare(self, other: MerkleTree) -> TreeDiff:
         """
@@ -185,11 +218,20 @@ def should_exclude(path: Path, exclude_patterns: list[str]) -> bool:
     return False
 
 
+def _build_path_lookup(node: MerkleNode, lookup: dict[str, MerkleNode]) -> None:
+    """Build a flat lookup table of path -> node from a tree."""
+    lookup[node.path] = node
+    for child in node.children.values():
+        _build_path_lookup(child, lookup)
+
+
 def _build_node(
     path: Path,
     project_root: Path,
     extensions: list[str],
     exclude_patterns: list[str],
+    previous_nodes: dict[str, MerkleNode],
+    stats: TreeBuildStats,
 ) -> MerkleNode | None:
     """Recursively build a node for a file or directory."""
     if should_exclude(path, exclude_patterns):
@@ -211,23 +253,43 @@ def _build_node(
 
         try:
             stat = path.stat()
-            file_hash = compute_file_hash(path)
+            current_mtime = stat.st_mtime
+            current_size = stat.st_size
+
+            # mtime optimization: reuse hash if mtime and size unchanged
+            previous = previous_nodes.get(relative_path)
+            if (
+                previous is not None
+                and previous.type == "file"
+                and previous.mtime == current_mtime
+                and previous.size == current_size
+            ):
+                # mtime and size match - reuse cached hash
+                stats.files_mtime_cached += 1
+                file_hash = previous.hash
+            else:
+                # mtime or size changed - compute new hash
+                stats.files_hashed += 1
+                file_hash = compute_file_hash(path)
+
             return MerkleNode(
                 hash=file_hash,
                 type="file",
                 path=relative_path,
-                size=stat.st_size,
-                mtime=stat.st_mtime,
+                size=current_size,
+                mtime=current_mtime,
             )
         except OSError:
             return None
 
     elif path.is_dir():
+        stats.directories_processed += 1
         children: dict[str, MerkleNode] = {}
         try:
             for child in sorted(path.iterdir()):
                 child_node = _build_node(
-                    child, project_root, extensions, exclude_patterns
+                    child, project_root, extensions, exclude_patterns,
+                    previous_nodes, stats,
                 )
                 if child_node is not None:
                     children[child.name] = child_node

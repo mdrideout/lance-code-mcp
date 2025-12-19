@@ -97,22 +97,28 @@ lance-code-mcp/
 ├── pyproject.toml              # Package config, entry point: lcm
 ├── README.md
 ├── PLAN.md                     # This file
+├── adr/
+│   └── 001-adr-merkle-trees.md # ADR: Why content-addressed Merkle trees
 ├── src/lance_code_mcp/
 │   ├── __init__.py             # Package constants (LCM_DIR, etc.)
 │   ├── cli.py                  # CLI commands (lcm) ✅
 │   ├── config.py               # Configuration management ✅
 │   ├── manifest.py             # Manifest file I/O ✅
 │   ├── server.py               # MCP server (stub)
-│   ├── indexer.py              # Orchestrates indexing pipeline (stub)
-│   ├── chunker.py              # Tree-sitter parsing (stub)
-│   ├── embeddings.py           # Local/Gemini/OpenAI providers (stub)
+│   ├── indexer.py              # Orchestrates indexing pipeline ✅
+│   ├── chunker.py              # Tree-sitter parsing ✅
+│   ├── embeddings.py           # Local embedding provider ✅
+│   ├── storage.py              # LanceDB wrapper ✅
 │   ├── search.py               # Hybrid + fuzzy search (stub)
 │   ├── watcher.py              # File watching (stub)
-│   └── merkle.py               # Merkle tree for change detection (stub)
+│   └── merkle.py               # Merkle tree for change detection ✅
 └── tests/
     ├── conftest.py             # Shared fixtures
     ├── fixtures/sample_project/ # Test codebase (Python, JS)
-    └── integration/test_cli.py  # P0 integration tests
+    └── integration/
+        ├── test_cli.py         # CLI integration tests (8 tests)
+        ├── test_indexing.py    # Indexing integration tests (7 tests)
+        └── test_merkle.py      # Merkle tree tests (23 tests)
 ```
 
 ## Module Specifications
@@ -854,7 +860,8 @@ Created by `lcm init`:
 tests/
 ├── conftest.py                    # cli_runner, sample_project fixtures
 ├── fixtures/sample_project/       # Curated test codebase (Python, JS)
-└── integration/test_cli.py        # 8 P0 integration tests
+└── integration/
+    └── test_cli.py                # 8 CLI integration tests
 ```
 
 ### Phase 2: Indexing Pipeline ✅ COMPLETE
@@ -862,24 +869,41 @@ tests/
 - [x] Local embedding provider (sentence-transformers, BAAI/bge-base-en-v1.5)
 - [x] LanceDB storage with code_chunks and embedding_cache tables
 - [x] Merkle tree implementation for change detection
+- [x] mtime optimization (skip content hashing when mtime+size unchanged)
 - [x] Manifest/hash tracking
 - [x] Incremental indexing logic
 - [x] `lcm index` command with --force and --verbose flags
-- [x] Integration tests for indexing
+- [x] Integration tests for indexing (7 tests)
+- [x] Comprehensive Merkle tree tests (23 tests)
+- [x] ADR documenting Merkle tree architecture decision
 
 **Implemented files:**
-- `src/lance_code_mcp/merkle.py` - Merkle tree (MerkleNode, MerkleTree, TreeDiff)
+- `src/lance_code_mcp/merkle.py` - Merkle tree with mtime optimization (MerkleNode, MerkleTree, TreeDiff, TreeBuildStats)
 - `src/lance_code_mcp/storage.py` - LanceDB wrapper (CodeChunk, CachedEmbedding, Storage)
 - `src/lance_code_mcp/chunker.py` - Tree-sitter parsing (Chunk, Chunker)
 - `src/lance_code_mcp/embeddings.py` - Local embeddings (EmbeddingProvider, LocalEmbeddingProvider)
 - `src/lance_code_mcp/indexer.py` - Pipeline orchestration (IndexStats, Indexer, run_index)
-- `tests/integration/test_indexing.py` - 7 P0 integration tests
+- `tests/integration/test_indexing.py` - 7 indexing integration tests
+- `tests/integration/test_merkle.py` - 23 Merkle tree tests
+- `adr/001-adr-merkle-trees.md` - Architecture decision record
 
-### Phase 3: Search
-- Hybrid search (vector + BM25)
-- Fuzzy search integration
-- Reranking strategies
-- CLI search command
+**Key optimizations:**
+- Embedding cache: Content-addressed by chunk hash, avoids re-embedding unchanged code
+- mtime cache: Reuses file hashes when mtime+size unchanged, reduces I/O on incremental scans
+
+### Phase 3: Search ← NEXT
+- [ ] Vector search using LanceDB
+- [ ] BM25 full-text search using LanceDB FTS
+- [ ] Hybrid search combining vector + BM25
+- [ ] Fuzzy search for symbol names (typo tolerance)
+- [ ] Reranking (RRF or linear combination)
+- [ ] `lcm search` CLI command implementation
+- [ ] Search result formatting with file context
+- [ ] Integration tests for search
+
+**Files to implement:**
+- `src/lance_code_mcp/search.py` - Search engine (replace stub)
+- `tests/integration/test_search.py` - Search integration tests
 
 ### Phase 4: MCP Server
 - FastMCP server setup

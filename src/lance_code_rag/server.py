@@ -1,11 +1,11 @@
-"""MCP server implementation for Lance Code MCP."""
+"""MCP server implementation for Lance Code RAG."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastmcp import FastMCP
 
-from .config import LCMConfig, load_config
+from .config import LCRConfig, load_config
 from .indexer import run_index
 from .manifest import Manifest, load_manifest
 from .merkle import MerkleTree
@@ -27,7 +27,7 @@ class ServerState:
     """Shared state for MCP server components."""
 
     project_root: Path
-    config: LCMConfig
+    config: LCRConfig
     manifest: Manifest | None
     _search_engine: SearchEngine | None = field(default=None, repr=False)
     _storage: Storage | None = field(default=None, repr=False)
@@ -69,7 +69,7 @@ def check_staleness(state: ServerState) -> StalenessInfo:
         return StalenessInfo(
             is_stale=True,
             stale_files=[],
-            message="No index found. Run 'lcm index' or use index_codebase tool.",
+            message="No index found. Run 'lcr index' or use index_codebase tool.",
         )
 
     # Build current tree from filesystem
@@ -285,7 +285,7 @@ def get_status_impl() -> dict:
 
 
 def get_config_impl() -> dict:
-    """Current Lance Code MCP configuration."""
+    """Current Lance Code RAG configuration."""
     state = get_state()
     return state.config.model_dump()
 
@@ -319,7 +319,7 @@ def get_files_impl() -> dict:
 # FastMCP Server and MCP Tool/Resource Wrappers
 # =============================================================================
 
-mcp = FastMCP("Lance Code MCP")
+mcp = FastMCP("Lance Code RAG")
 
 
 @mcp.tool
@@ -405,19 +405,19 @@ def get_stale_status() -> dict:
     return get_stale_status_impl()
 
 
-@mcp.resource("lcm://status")
+@mcp.resource("lcr://status")
 def get_status() -> dict:
     """Current index status, statistics, and staleness information."""
     return get_status_impl()
 
 
-@mcp.resource("lcm://config")
+@mcp.resource("lcr://config")
 def get_config() -> dict:
-    """Current Lance Code MCP configuration."""
+    """Current Lance Code RAG configuration."""
     return get_config_impl()
 
 
-@mcp.resource("lcm://files")
+@mcp.resource("lcr://files")
 def get_files() -> dict:
     """List of all indexed files with chunk counts."""
     return get_files_impl()

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from lance_code_mcp.merkle import (
+from lance_code_rag.merkle import (
     MerkleNode,
     MerkleTree,
     TreeDiff,

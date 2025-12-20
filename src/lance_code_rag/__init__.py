@@ -1,9 +1,9 @@
-"""Lance Code MCP - Semantic code search over local codebases via MCP."""
+"""Lance Code RAG - Semantic code search over local codebases via MCP."""
 
 __version__ = "0.1.0"
 
 # Directory and file constants
-LCM_DIR = ".lance-code-mcp"
+LCR_DIR = ".lance-code-rag"
 CONFIG_FILE = "config.json"
 MANIFEST_FILE = "manifest.json"
 MCP_CONFIG_FILE = ".mcp.json"

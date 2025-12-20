@@ -1,4 +1,4 @@
-"""Tree-sitter based code chunking for Lance Code MCP."""
+"""Tree-sitter based code chunking for Lance Code RAG."""
 
 from __future__ import annotations
 

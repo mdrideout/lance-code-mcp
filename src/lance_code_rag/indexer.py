@@ -1,4 +1,4 @@
-"""Indexing pipeline orchestration for Lance Code MCP."""
+"""Indexing pipeline orchestration for Lance Code RAG."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from .chunker import Chunk, Chunker
-from .config import LCMConfig, load_config
+from .config import LCRConfig, load_config
 from .embeddings import EmbeddingProvider, get_embedding_provider
 from .manifest import ManifestStats, create_empty_manifest, load_manifest, save_manifest
 from .merkle import MerkleTree, TreeDiff, compute_file_hash
@@ -35,7 +35,7 @@ class Indexer:
     def __init__(
         self,
         project_root: Path,
-        config: LCMConfig | None = None,
+        config: LCRConfig | None = None,
         verbose: bool = False,
         console: Console | None = None,
     ):

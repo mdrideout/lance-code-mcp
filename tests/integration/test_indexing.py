@@ -6,12 +6,12 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from lance_code_mcp import LCM_DIR
-from lance_code_mcp.cli import main
+from lance_code_rag import LCR_DIR
+from lance_code_rag.cli import main
 
 
 class TestIndexCommand:
-    """Tests for the lcm index command."""
+    """Tests for the lcr index command."""
 
     def test_index_creates_lancedb(self, tmp_path: Path, sample_project: Path):
         """Index command creates LanceDB directory."""
@@ -31,7 +31,7 @@ class TestIndexCommand:
             assert result.exit_code == 0
 
             # Verify LanceDB created
-            lancedb_dir = Path(LCM_DIR) / "lancedb"
+            lancedb_dir = Path(LCR_DIR) / "lancedb"
             assert lancedb_dir.exists()
 
     def test_index_chunks_python_files(self, tmp_path: Path, sample_project: Path):

@@ -1,1 +1,1 @@
-# lance-code-mcp
+# lance-code-rag

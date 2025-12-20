@@ -1,12 +1,12 @@
-# Lance Code MCP (lcm) - Architecture Plan
+# Lance Code RAG (lcr) - Architecture Plan
 
 ## Executive Summary
 
 Build an installable Python package that provides semantic code search over local codebases via the Model Context Protocol (MCP). The system combines BM25 keyword search, vector embeddings, and fuzzy matching for hybrid retrieval. Runs entirely locally with project-scoped index storage.
 
 **Key Design Goals:**
-- CLI command: `lcm`
-- Project-local storage at `.lance-code-mcp/`
+- CLI command: `lcr`
+- Project-local storage at `.lance-code-rag/`
 - Hash-based incremental indexing (only re-index changed files)
 - Optional reactive file watching
 - Hybrid search: BM25 + semantic vectors + fuzzy matching
@@ -28,12 +28,12 @@ Build an installable Python package that provides semantic code search over loca
 │            │                                                │                │
 │            ▼                                                │                │
 │  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                         MCP SERVER (lcm serve)                           ││
+│  │                         MCP SERVER (lcr serve)                           ││
 │  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  ││
 │  │  │     TOOLS       │  │   RESOURCES     │  │       PROMPTS           │  ││
 │  │  │                 │  │                 │  │                         │  ││
-│  │  │ • search_code   │  │ • lcm://status  │  │ • code_review           │  ││
-│  │  │ • index_codebase│  │ • lcm://files   │  │ • explain_codebase      │  ││
+│  │  │ • search_code   │  │ • lcr://status  │  │ • code_review           │  ││
+│  │  │ • index_codebase│  │ • lcr://files   │  │ • explain_codebase      │  ││
 │  │  │ • get_file_     │  │                 │  │                         │  ││
 │  │  │   context       │  │                 │  │                         │  ││
 │  │  │ • find_symbol   │  │                 │  │                         │  ││
@@ -73,7 +73,7 @@ Build an installable Python package that provides semantic code search over loca
 │                                      │                                       │
 │                                      ▼                                       │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                     .lance-code-mcp/  (PROJECT LOCAL)                  │  │
+│  │                     .lance-code-rag/  (PROJECT LOCAL)                  │  │
 │  │                                                                        │  │
 │  │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │  │
 │  │   │   lancedb/  │  │ manifest.   │  │  config.    │  │   index.    │  │  │
@@ -93,15 +93,15 @@ Build an installable Python package that provides semantic code search over loca
 ## Project Structure
 
 ```
-lance-code-mcp/
-├── pyproject.toml              # Package config, entry point: lcm
+lance-code-rag/
+├── pyproject.toml              # Package config, entry point: lcr
 ├── README.md
 ├── PLAN.md                     # This file
 ├── adr/
 │   └── 001-adr-merkle-trees.md # ADR: Why content-addressed Merkle trees
-├── src/lance_code_mcp/
-│   ├── __init__.py             # Package constants (LCM_DIR, etc.)
-│   ├── cli.py                  # CLI commands (lcm) ✅
+├── src/lance_code_rag/
+│   ├── __init__.py             # Package constants (LCR_DIR, etc.)
+│   ├── cli.py                  # CLI commands (lcr) ✅
 │   ├── config.py               # Configuration management ✅
 │   ├── manifest.py             # Manifest file I/O ✅
 │   ├── server.py               # MCP server (stub)
@@ -166,23 +166,23 @@ lance-code-mcp/
 
 ## CLI Specification (cli.py)
 
-**Command:** `lcm`
+**Command:** `lcr`
 
 ### Commands
 
 | Command | Arguments | Description |
 |---------|-----------|-------------|
-| `lcm init` | `--embedding [local\|gemini\|openai]` | Initialize in project, create .mcp.json |
-| `lcm index` | `--watch`, `--force`, `--verbose` | Index codebase (incremental by default) |
-| `lcm status` | None | Show index status, stale files count |
-| `lcm search` | `QUERY`, `-n`, `--fuzzy`, `--bm25-weight` | Search from CLI |
-| `lcm serve` | `--port` | Start MCP server |
-| `lcm clean` | None | Remove .lance-code-mcp directory |
+| `lcr init` | `--embedding [local\|gemini\|openai]` | Initialize in project, create .mcp.json |
+| `lcr index` | `--watch`, `--force`, `--verbose` | Index codebase (incremental by default) |
+| `lcr status` | None | Show index status, stale files count |
+| `lcr search` | `QUERY`, `-n`, `--fuzzy`, `--bm25-weight` | Search from CLI |
+| `lcr serve` | `--port` | Start MCP server |
+| `lcr clean` | None | Remove .lance-code-rag directory |
 
 ### Index Behavior
 
 ```
-lcm index
+lcr index
     │
     ▼
 ┌─────────────────────────────┐
@@ -252,7 +252,7 @@ Use a Merkle tree that mirrors the directory structure. Each node contains a has
 
 ### Manifest File Structure
 
-Location: `.lance-code-mcp/manifest.json`
+Location: `.lance-code-rag/manifest.json`
 
 ```
 {
@@ -396,9 +396,9 @@ When `src/utils.py` changes:
 
 | Mode | Command | Behavior |
 |------|---------|----------|
-| One-shot | `lcm index` | Index once and exit |
-| Watch | `lcm index --watch` | Index then watch for changes continuously |
-| Server | `lcm serve` | Check staleness on search, lazy re-index |
+| One-shot | `lcr index` | Index once and exit |
+| Watch | `lcr index --watch` | Index then watch for changes continuously |
+| Server | `lcr serve` | Check staleness on search, lazy re-index |
 
 ### Watch Mode Architecture
 
@@ -457,7 +457,7 @@ Return results WITH staleness warning:
 }
 ```
 
-**Rationale**: Never block the user. Stale results are better than no results. User can trigger re-index if needed via `index_codebase` tool or `lcm index` CLI.
+**Rationale**: Never block the user. Stale results are better than no results. User can trigger re-index if needed via `index_codebase` tool or `lcr index` CLI.
 
 ---
 
@@ -617,9 +617,9 @@ Cache entries are never invalidated (content-addressed). Old entries naturally b
 ### Provider Selection
 
 Priority order:
-1. Command line flag: `lcm init --embedding gemini`
-2. Config file: `.lance-code-mcp/config.json`
-3. Environment variable: `LCM_EMBEDDING_PROVIDER`
+1. Command line flag: `lcr init --embedding gemini`
+2. Config file: `.lance-code-rag/config.json`
+3. Environment variable: `LCR_EMBEDDING_PROVIDER`
 4. Default: `local`
 
 ### Embedding Consistency
@@ -637,7 +637,7 @@ Priority order:
 
 ```
 project-root/
-├── .lance-code-mcp/           # All lcm data (add to .gitignore)
+├── .lance-code-rag/           # All lcr data (add to .gitignore)
 │   ├── lancedb/               # LanceDB database files
 │   │   ├── code_chunks.lance/ # Vector + FTS index
 │   │   └── embedding_cache.lance/ # Cached embeddings
@@ -650,11 +650,11 @@ project-root/
 
 ### .gitignore Entry
 
-`lcm init` should append to .gitignore:
+`lcr init` should append to .gitignore:
 
 ```
 # Lance Code MCP
-.lance-code-mcp/
+.lance-code-rag/
 ```
 
 ### LanceDB Schema
@@ -686,7 +686,7 @@ project-root/
 
 ### Config File
 
-Location: `.lance-code-mcp/config.json`
+Location: `.lance-code-rag/config.json`
 
 ```
 {
@@ -720,9 +720,9 @@ Location: `.lance-code-mcp/config.json`
 
 | URI | Description |
 |-----|-------------|
-| `lcm://status` | Index status, stats, staleness |
-| `lcm://config` | Current configuration |
-| `lcm://files` | List of indexed files with metadata |
+| `lcr://status` | Index status, stats, staleness |
+| `lcr://config` | Current configuration |
+| `lcr://files` | List of indexed files with metadata |
 
 ### Prompts
 
@@ -735,12 +735,12 @@ Location: `.lance-code-mcp/config.json`
 ### Server Startup Sequence
 
 ```
-lcm serve
+lcr serve
     │
     ▼
-Check .lance-code-mcp/ exists
+Check .lance-code-rag/ exists
     │
-    ├── No ──▶ Error: "Run 'lcm init' first"
+    ├── No ──▶ Error: "Run 'lcr init' first"
     │
     ▼ Yes
 Load config.json
@@ -795,16 +795,16 @@ via CLI or index_codebase tool.
 
 ## MCP Configuration (.mcp.json)
 
-Created by `lcm init`:
+Created by `lcr init`:
 
 ```
 {
   "mcpServers": {
-    "lance-code-mcp": {
-      "command": "lcm",
+    "lance-code-rag": {
+      "command": "lcr",
       "args": ["serve"],
       "env": {
-        "LCM_ROOT": "/absolute/path/to/project"
+        "LCR_ROOT": "/absolute/path/to/project"
       }
     }
   }
@@ -817,9 +817,9 @@ Created by `lcm init`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| LCM_ROOT | Project root override | Current directory |
-| LCM_EMBEDDING_PROVIDER | Embedding provider | "local" |
-| LCM_EMBEDDING_MODEL | Specific model name | Provider default |
+| LCR_ROOT | Project root override | Current directory |
+| LCR_EMBEDDING_PROVIDER | Embedding provider | "local" |
+| LCR_EMBEDDING_MODEL | Specific model name | Provider default |
 | OPENAI_API_KEY | OpenAI API key | - |
 | GEMINI_API_KEY | Gemini API key | - |
 
@@ -829,9 +829,9 @@ Created by `lcm init`:
 
 | Scenario | Behavior |
 |----------|----------|
-| Not initialized | "Run 'lcm init' to set up this project" |
-| Index missing | "Run 'lcm index' to build the search index" |
-| Provider mismatch | "Index was built with X, but config specifies Y. Run 'lcm index --force'" |
+| Not initialized | "Run 'lcr init' to set up this project" |
+| Index missing | "Run 'lcr index' to build the search index" |
+| Provider mismatch | "Index was built with X, but config specifies Y. Run 'lcr index --force'" |
 | API key missing | "Set GEMINI_API_KEY environment variable" |
 | File parse error | Log warning, skip file, continue |
 | Concurrent index | Wait for lock or error |
@@ -842,19 +842,19 @@ Created by `lcm init`:
 
 ### Phase 1: Core Setup ✅ COMPLETE
 - [x] Package structure with pyproject.toml (hatchling build backend)
-- [x] CLI skeleton with click (`lcm` command)
+- [x] CLI skeleton with click (`lcr` command)
 - [x] Config module with Pydantic models (`config.py`)
 - [x] Manifest module with Pydantic models (`manifest.py`)
 - [x] All CLI commands: init, index, status, search, serve, clean
-- [x] Environment variable overrides (LCM_EMBEDDING_PROVIDER, LCM_EMBEDDING_MODEL)
+- [x] Environment variable overrides (LCR_EMBEDDING_PROVIDER, LCR_EMBEDDING_MODEL)
 - [x] Test infrastructure with fixture codebase
 
 **Implemented files:**
-- `src/lance_code_mcp/__init__.py` - Package constants
-- `src/lance_code_mcp/cli.py` - Full CLI implementation
-- `src/lance_code_mcp/config.py` - Pydantic config with env overrides
-- `src/lance_code_mcp/manifest.py` - Pydantic manifest I/O
-- `src/lance_code_mcp/{server,indexer,chunker,embeddings,search,watcher,merkle}.py` - Stubs
+- `src/lance_code_rag/__init__.py` - Package constants
+- `src/lance_code_rag/cli.py` - Full CLI implementation
+- `src/lance_code_rag/config.py` - Pydantic config with env overrides
+- `src/lance_code_rag/manifest.py` - Pydantic manifest I/O
+- `src/lance_code_rag/{server,indexer,chunker,embeddings,search,watcher,merkle}.py` - Stubs
 
 **Test structure:**
 ```
@@ -873,17 +873,17 @@ tests/
 - [x] mtime optimization (skip content hashing when mtime+size unchanged)
 - [x] Manifest/hash tracking
 - [x] Incremental indexing logic
-- [x] `lcm index` command with --force and --verbose flags
+- [x] `lcr index` command with --force and --verbose flags
 - [x] Integration tests for indexing (7 tests)
 - [x] Comprehensive Merkle tree tests (23 tests)
 - [x] ADR documenting Merkle tree architecture decision
 
 **Implemented files:**
-- `src/lance_code_mcp/merkle.py` - Merkle tree with mtime optimization (MerkleNode, MerkleTree, TreeDiff, TreeBuildStats)
-- `src/lance_code_mcp/storage.py` - LanceDB wrapper (CodeChunk, CachedEmbedding, Storage)
-- `src/lance_code_mcp/chunker.py` - Tree-sitter parsing (Chunk, Chunker)
-- `src/lance_code_mcp/embeddings.py` - Local embeddings (EmbeddingProvider, LocalEmbeddingProvider)
-- `src/lance_code_mcp/indexer.py` - Pipeline orchestration (IndexStats, Indexer, run_index)
+- `src/lance_code_rag/merkle.py` - Merkle tree with mtime optimization (MerkleNode, MerkleTree, TreeDiff, TreeBuildStats)
+- `src/lance_code_rag/storage.py` - LanceDB wrapper (CodeChunk, CachedEmbedding, Storage)
+- `src/lance_code_rag/chunker.py` - Tree-sitter parsing (Chunk, Chunker)
+- `src/lance_code_rag/embeddings.py` - Local embeddings (EmbeddingProvider, LocalEmbeddingProvider)
+- `src/lance_code_rag/indexer.py` - Pipeline orchestration (IndexStats, Indexer, run_index)
 - `tests/integration/test_indexing.py` - 7 indexing integration tests
 - `tests/integration/test_merkle.py` - 23 Merkle tree tests
 - `adr/001-adr-merkle-trees.md` - Architecture decision record
@@ -898,12 +898,12 @@ tests/
 - [x] Hybrid search combining vector + BM25 with RRF reranking
 - [x] Fuzzy search for symbol names (typo tolerance using SequenceMatcher)
 - [x] Reranking (Reciprocal Rank Fusion)
-- [x] `lcm search` CLI command implementation
+- [x] `lcr search` CLI command implementation
 - [x] Search result formatting with Rich syntax highlighting
 - [x] Integration tests for search (12 tests)
 
 **Implemented files:**
-- `src/lance_code_mcp/search.py` - SearchEngine class with vector, FTS, hybrid, fuzzy search
+- `src/lance_code_rag/search.py` - SearchEngine class with vector, FTS, hybrid, fuzzy search
 - `tests/integration/test_search.py` - 12 search integration tests
 
 **Key features:**

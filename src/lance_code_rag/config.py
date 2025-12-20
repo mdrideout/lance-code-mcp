@@ -1,4 +1,4 @@
-"""Configuration management for Lance Code MCP."""
+"""Configuration management for Lance Code RAG."""
 
 import json
 import os
@@ -7,11 +7,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from . import CONFIG_FILE, LCM_DIR
+from . import CONFIG_FILE, LCR_DIR
 
 
-class LCMConfig(BaseModel):
-    """Configuration for Lance Code MCP."""
+class LCRConfig(BaseModel):
+    """Configuration for Lance Code RAG."""
 
     version: int = 1
     embedding_provider: Literal["local", "gemini", "openai"] = "local"
@@ -27,7 +27,7 @@ class LCMConfig(BaseModel):
             "__pycache__",
             "venv",
             ".venv",
-            ".lance-code-mcp",
+            ".lance-code-rag",
             "dist",
             "build",
             ".egg-info",
@@ -55,17 +55,17 @@ EMBEDDING_MODELS = {
 }
 
 
-def get_lcm_dir(project_root: Path) -> Path:
-    """Get the .lance-code-mcp directory path."""
-    return project_root / LCM_DIR
+def get_lcr_dir(project_root: Path) -> Path:
+    """Get the .lance-code-rag directory path."""
+    return project_root / LCR_DIR
 
 
 def get_config_path(project_root: Path) -> Path:
     """Get the config file path."""
-    return get_lcm_dir(project_root) / CONFIG_FILE
+    return get_lcr_dir(project_root) / CONFIG_FILE
 
 
-def load_config(project_root: Path) -> LCMConfig:
+def load_config(project_root: Path) -> LCRConfig:
     """Load configuration from the project's config file.
 
     Falls back to defaults if file doesn't exist.
@@ -76,9 +76,9 @@ def load_config(project_root: Path) -> LCMConfig:
     if config_path.exists():
         with open(config_path) as f:
             data = json.load(f)
-        config = LCMConfig.model_validate(data)
+        config = LCRConfig.model_validate(data)
     else:
-        config = LCMConfig()
+        config = LCRConfig()
 
     # Apply environment variable overrides
     config = _apply_env_overrides(config)
@@ -86,7 +86,7 @@ def load_config(project_root: Path) -> LCMConfig:
     return config
 
 
-def save_config(config: LCMConfig, project_root: Path) -> None:
+def save_config(config: LCRConfig, project_root: Path) -> None:
     """Save configuration to the project's config file."""
     config_path = get_config_path(project_root)
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -97,22 +97,22 @@ def save_config(config: LCMConfig, project_root: Path) -> None:
 
 def create_default_config(
     embedding_provider: Literal["local", "gemini", "openai"] = "local",
-) -> LCMConfig:
+) -> LCRConfig:
     """Create a default configuration with the specified embedding provider."""
     model_config = EMBEDDING_MODELS[embedding_provider]
-    return LCMConfig(
+    return LCRConfig(
         embedding_provider=embedding_provider,
         embedding_model=model_config["default"],
         embedding_dimensions=model_config["dimensions"],
     )
 
 
-def _apply_env_overrides(config: LCMConfig) -> LCMConfig:
+def _apply_env_overrides(config: LCRConfig) -> LCRConfig:
     """Apply environment variable overrides to config."""
     data = config.model_dump()
 
-    # LCM_EMBEDDING_PROVIDER
-    if provider := os.environ.get("LCM_EMBEDDING_PROVIDER"):
+    # LCR_EMBEDDING_PROVIDER
+    if provider := os.environ.get("LCR_EMBEDDING_PROVIDER"):
         if provider in ("local", "gemini", "openai"):
             data["embedding_provider"] = provider
             # Update model and dimensions for new provider
@@ -120,8 +120,8 @@ def _apply_env_overrides(config: LCMConfig) -> LCMConfig:
             data["embedding_model"] = model_config["default"]
             data["embedding_dimensions"] = model_config["dimensions"]
 
-    # LCM_EMBEDDING_MODEL
-    if model := os.environ.get("LCM_EMBEDDING_MODEL"):
+    # LCR_EMBEDDING_MODEL
+    if model := os.environ.get("LCR_EMBEDDING_MODEL"):
         data["embedding_model"] = model
 
-    return LCMConfig.model_validate(data)
+    return LCRConfig.model_validate(data)

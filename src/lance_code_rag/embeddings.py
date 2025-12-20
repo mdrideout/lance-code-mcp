@@ -1,8 +1,8 @@
-"""Embedding providers for Lance Code MCP."""
+"""Embedding providers for Lance Code RAG."""
 
 from abc import ABC, abstractmethod
 
-from .config import LCMConfig
+from .config import LCRConfig
 
 
 class EmbeddingProvider(ABC):
@@ -33,56 +33,59 @@ class EmbeddingProvider(ABC):
 
 
 class LocalEmbeddingProvider(EmbeddingProvider):
-    """Local embedding using sentence-transformers."""
+    """Local embedding using FastEmbed (ONNX-based, lightweight)."""
+
+    # FastEmbed model name mapping
+    MODEL_MAP = {
+        # Map common names to FastEmbed model names
+        "BAAI/bge-base-en-v1.5": "BAAI/bge-base-en-v1.5",
+        "BAAI/bge-small-en-v1.5": "BAAI/bge-small-en-v1.5",
+        "BAAI/bge-large-en-v1.5": "BAAI/bge-large-en-v1.5",
+        # Default
+        "bge-base": "BAAI/bge-base-en-v1.5",
+        "bge-small": "BAAI/bge-small-en-v1.5",
+    }
+
+    DIMENSIONS = {
+        "BAAI/bge-base-en-v1.5": 768,
+        "BAAI/bge-small-en-v1.5": 384,
+        "BAAI/bge-large-en-v1.5": 1024,
+    }
 
     def __init__(self, model_name: str = "BAAI/bge-base-en-v1.5"):
-        self.model_name = model_name
+        # Map to FastEmbed model name if needed
+        self.model_name = self.MODEL_MAP.get(model_name, model_name)
         self._model = None  # Lazy loading
-        self._dimensions: int | None = None
 
     @property
     def dimensions(self) -> int:
-        """BGE-base has 768 dimensions."""
-        if self._dimensions is not None:
-            return self._dimensions
-        # Default for BGE models
-        if "bge-base" in self.model_name:
-            return 768
-        if "bge-small" in self.model_name:
-            return 384
-        if "bge-large" in self.model_name:
-            return 1024
-        # Fallback - load model to get dimensions
-        self._load_model()
-        return self._dimensions or 768
+        """Return embedding dimensions for the model."""
+        return self.DIMENSIONS.get(self.model_name, 384)
 
     def _load_model(self):
         """Lazy load the model on first use."""
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self.model_name)
-            self._dimensions = self._model.get_sentence_embedding_dimension()
+            from fastembed import TextEmbedding
+
+            self._model = TextEmbedding(model_name=self.model_name)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Batch embed texts using sentence-transformers."""
+        """Batch embed texts using FastEmbed."""
         if not texts:
             return []
 
         self._load_model()
-        embeddings = self._model.encode(
-            texts,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
-        return embeddings.tolist()
+        # FastEmbed returns a generator, convert to list
+        embeddings = list(self._model.embed(texts))
+        return [emb.tolist() for emb in embeddings]
 
 
-def get_embedding_provider(config: LCMConfig) -> EmbeddingProvider:
+def get_embedding_provider(config: LCRConfig) -> EmbeddingProvider:
     """
     Factory function to get the appropriate embedding provider.
 
     Args:
-        config: LCM configuration with provider settings
+        config: LCR configuration with provider settings
 
     Returns:
         An EmbeddingProvider instance

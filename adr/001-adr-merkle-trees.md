@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Lance Code MCP indexes codebases to enable semantic code search. The indexing pipeline must:
+Lance Code RAG indexes codebases to enable semantic code search. The indexing pipeline must:
 
 1. **Detect changes efficiently** - Avoid re-indexing unchanged files
 2. **Handle incremental updates** - Process only what changed since last index
@@ -118,4 +118,4 @@ MSTs would add complexity (balancing, key ordering) without providing benefits f
 
 - [Merkle Tree (Wikipedia)](https://en.wikipedia.org/wiki/Merkle_tree)
 - [Git's use of SHA-1 trees](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects)
-- Implementation: `src/lance_code_mcp/merkle.py`
+- Implementation: `src/lance_code_rag/merkle.py`

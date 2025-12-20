@@ -1,4 +1,4 @@
-"""Hybrid search implementation for Lance Code MCP."""
+"""Hybrid search implementation for Lance Code RAG."""
 
 import time
 from dataclasses import dataclass

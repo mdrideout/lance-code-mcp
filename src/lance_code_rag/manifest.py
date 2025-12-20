@@ -1,4 +1,4 @@
-"""Manifest file management for Lance Code MCP."""
+"""Manifest file management for Lance Code RAG."""
 
 import json
 from datetime import UTC, datetime
@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from . import LCM_DIR, MANIFEST_FILE
+from . import LCR_DIR, MANIFEST_FILE
 
 
 class ManifestStats(BaseModel):
@@ -29,7 +29,7 @@ class Manifest(BaseModel):
 
 def get_manifest_path(project_root: Path) -> Path:
     """Get the manifest file path."""
-    return project_root / LCM_DIR / MANIFEST_FILE
+    return project_root / LCR_DIR / MANIFEST_FILE
 
 
 def load_manifest(project_root: Path) -> Manifest | None:

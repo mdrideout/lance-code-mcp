@@ -1,22 +1,83 @@
-"""CLI for Lance Code MCP."""
+"""CLI for Lance Code RAG."""
 
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
-from typing import Literal
 
 import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from . import LCM_DIR, MCP_CONFIG_FILE, __version__
-from .config import create_default_config, get_lcm_dir, load_config, save_config
+from . import LCR_DIR, MCP_CONFIG_FILE, __version__
+from .config import get_lcr_dir, load_config, save_config
 from .manifest import create_empty_manifest, load_manifest, save_manifest
 
 console = Console()
 error_console = Console(stderr=True)
+
+
+def _detect_lcr_command() -> tuple[str, list[str]]:
+    """Detect how to invoke lcr (global install vs uv run).
+
+    Returns:
+        Tuple of (command, args) for MCP config.
+        Examples:
+            ("lcr", ["serve"]) - globally installed
+            ("uv", ["run", "--project", "/path/to/lcr", "lcr", "serve"]) - via uv
+    """
+    # Check if lcr is globally available
+    try:
+        result = subprocess.run(
+            ["which", "lcr"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            lcr_path = result.stdout.strip()
+            # Make sure it's not just the local .venv
+            if ".venv" not in lcr_path:
+                return ("lcr", ["serve"])
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    # Check if installed as uv tool
+    try:
+        result = subprocess.run(
+            ["uv", "tool", "list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and "lance-code-rag" in result.stdout:
+            return ("lcr", ["serve"])
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    # Fall back to uv run with project path
+    # Find the lance-code-rag project directory
+    lcr_project = _find_lcr_project()
+    if lcr_project:
+        return ("uv", ["run", "--project", str(lcr_project), "lcr", "serve"])
+
+    # Last resort: assume it will be installed globally
+    return ("lcr", ["serve"])
+
+
+def _find_lcr_project() -> Path | None:
+    """Find the lance-code-rag project directory."""
+    # Check if we're running from the lcr project itself
+    import lance_code_rag
+
+    module_path = Path(lance_code_rag.__file__).parent
+    # Go up from src/lance_code_rag to project root
+    project_root = module_path.parent.parent
+    if (project_root / "pyproject.toml").exists():
+        return project_root
+    return None
 
 
 def get_project_root() -> Path:
@@ -25,54 +86,109 @@ def get_project_root() -> Path:
 
 
 def is_initialized(project_root: Path) -> bool:
-    """Check if lcm is initialized in the project."""
-    return get_lcm_dir(project_root).exists()
+    """Check if lcr is initialized in the project."""
+    return get_lcr_dir(project_root).exists()
 
 
 def require_initialized(project_root: Path) -> None:
-    """Raise an error if lcm is not initialized."""
+    """Raise an error if lcr is not initialized."""
     if not is_initialized(project_root):
         error_console.print(
-            "[red]Error:[/red] Not initialized. Run [bold]lcm init[/bold] first."
+            "[red]Error:[/red] Not initialized. Run [bold]lcr init[/bold] first."
         )
         sys.exit(1)
 
 
-@click.group()
-@click.version_option(version=__version__, prog_name="lcm")
-def main() -> None:
-    """Lance Code MCP - Semantic code search via MCP."""
-    pass
+@click.group(invoke_without_command=True)
+@click.version_option(version=__version__, prog_name="lcr")
+@click.pass_context
+def main(ctx: click.Context) -> None:
+    """Lance Code RAG - Semantic code search via MCP."""
+    if ctx.invoked_subcommand is None:
+        # Show banner and help when run without subcommand
+        from .tui import print_banner
+
+        print_banner(console)
+        console.print()
+        console.print(ctx.get_help())
 
 
 @main.command()
 @click.option(
     "--embedding",
     type=click.Choice(["local", "gemini", "openai"]),
-    default="local",
-    help="Embedding provider to use",
+    default=None,
+    help="Embedding provider (skips interactive wizard)",
+)
+@click.option(
+    "--model",
+    default=None,
+    help="Specific embedding model name",
 )
 @click.option(
     "--force",
     is_flag=True,
     help="Overwrite existing configuration",
 )
-def init(embedding: Literal["local", "gemini", "openai"], force: bool) -> None:
-    """Initialize lcm in the current project."""
-    project_root = get_project_root()
-    lcm_dir = get_lcm_dir(project_root)
+@click.option(
+    "--no-index",
+    is_flag=True,
+    help="Skip automatic indexing after init",
+)
+def init(
+    embedding: str | None,
+    model: str | None,
+    force: bool,
+    no_index: bool,
+) -> None:
+    """Initialize lcr in the current project.
 
-    if lcm_dir.exists() and not force:
+    Without flags, runs an interactive wizard.
+    With --embedding, uses non-interactive mode.
+    """
+    from .config import EMBEDDING_MODELS
+    from .indexer import run_index
+
+    project_root = get_project_root()
+    lcr_dir = get_lcr_dir(project_root)
+
+    if lcr_dir.exists() and not force:
         error_console.print(
-            f"[yellow]Warning:[/yellow] {LCM_DIR}/ already exists. Use --force to reinitialize."
+            f"[yellow]Warning:[/yellow] {LCR_DIR}/ already exists. Use --force to reinitialize."
         )
         sys.exit(1)
 
-    # Create .lance-code-mcp directory
-    lcm_dir.mkdir(parents=True, exist_ok=True)
+    # Determine configuration via wizard or CLI flags
+    if embedding is None:
+        # Interactive Textual wizard
+        from .tui import run_init_wizard
 
-    # Create config
-    config = create_default_config(embedding)
+        result = run_init_wizard()
+        if result.cancelled:
+            console.print("[dim]Cancelled.[/dim]")
+            sys.exit(0)
+
+        provider = result.provider
+        model_name = result.model
+        dimensions = result.dimensions
+    else:
+        # CLI flag mode (backward compatible)
+        provider = embedding
+        model_config = EMBEDDING_MODELS[provider]
+        model_name = model if model else model_config["default"]
+        dimensions = model_config["dimensions"]
+
+    # Create .lance-code-rag directory
+    lcr_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create config with specific model/dimensions
+    from .config import LCRConfig
+
+    config = LCRConfig(
+        embedding_provider=provider,
+        embedding_model=model_name,
+        embedding_dimensions=dimensions,
+    )
     save_config(config, project_root)
 
     # Create empty manifest
@@ -80,22 +196,41 @@ def init(embedding: Literal["local", "gemini", "openai"], force: bool) -> None:
     save_manifest(manifest, project_root)
 
     # Create/update .mcp.json
-    _create_mcp_config(project_root)
+    mcp_command = _create_mcp_config(project_root)
 
     # Update .gitignore
     _update_gitignore(project_root)
 
     console.print(
         Panel(
-            f"[green]Initialized Lance Code MCP[/green]\n\n"
-            f"Embedding provider: [bold]{embedding}[/bold]\n"
-            f"Config directory: [dim]{lcm_dir}[/dim]\n\n"
-            f"Next steps:\n"
-            f"  1. Run [bold]lcm index[/bold] to build the search index\n"
-            f"  2. Run [bold]lcm serve[/bold] to start the MCP server",
-            title="lcm init",
+            f"[green]Initialized Lance Code RAG[/green]\n\n"
+            f"Embedding provider: [bold]{provider}[/bold]\n"
+            f"Model: [bold]{model_name}[/bold]\n"
+            f"Config directory: [dim]{lcr_dir}[/dim]\n"
+            f"MCP command: [dim]{mcp_command}[/dim]",
+            title="lcr init",
         )
     )
+
+    # Auto-run indexing unless --no-index
+    if not no_index:
+        console.print("\n[bold]Building search index...[/bold]")
+        stats = run_index(project_root, force=False, verbose=False, console=console)
+
+        # Display results
+        table = Table(title="Indexing Complete")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Count", justify="right")
+
+        table.add_row("Files indexed", str(stats.files_scanned))
+        table.add_row("Chunks created", str(stats.chunks_added))
+        table.add_row("Embeddings computed", str(stats.embeddings_computed))
+
+        console.print(table)
+        console.print("\n[green]✓ Ready![/green] MCP server configured in .mcp.json")
+        console.print("[dim]Claude Code/Cursor will auto-start the server when you open this project.[/dim]")
+    else:
+        console.print("\n[dim]Skipped indexing. Run [bold]lcr index[/bold] when ready.[/dim]")
 
 
 @main.command()
@@ -148,7 +283,7 @@ def status() -> None:
     config = load_config(project_root)
     manifest = load_manifest(project_root)
 
-    table = Table(title="Lance Code MCP Status")
+    table = Table(title="Lance Code RAG Status")
     table.add_column("Property", style="cyan")
     table.add_column("Value")
 
@@ -163,7 +298,7 @@ def status() -> None:
         if manifest.tree:
             table.add_row("Index status", "[green]Ready[/green]")
         else:
-            table.add_row("Index status", "[yellow]Empty - run 'lcm index'[/yellow]")
+            table.add_row("Index status", "[yellow]Empty - run 'lcr index'[/yellow]")
     else:
         table.add_row("Index status", "[red]No manifest found[/red]")
 
@@ -273,25 +408,29 @@ def serve(port: int | None) -> None:
 @main.command()
 @click.option("--force", "-f", is_flag=True, help="Skip confirmation prompt")
 def clean(force: bool) -> None:
-    """Remove the .lance-code-mcp directory."""
+    """Remove the .lance-code-rag directory."""
     project_root = get_project_root()
-    lcm_dir = get_lcm_dir(project_root)
+    lcr_dir = get_lcr_dir(project_root)
 
-    if not lcm_dir.exists():
-        console.print(f"[dim]Nothing to clean - {LCM_DIR}/ does not exist.[/dim]")
+    if not lcr_dir.exists():
+        console.print(f"[dim]Nothing to clean - {LCR_DIR}/ does not exist.[/dim]")
         return
 
     if not force:
-        if not click.confirm(f"Remove {lcm_dir}?"):
+        if not click.confirm(f"Remove {lcr_dir}?"):
             console.print("[dim]Cancelled.[/dim]")
             return
 
-    shutil.rmtree(lcm_dir)
-    console.print(f"[green]Removed {LCM_DIR}/[/green]")
+    shutil.rmtree(lcr_dir)
+    console.print(f"[green]Removed {LCR_DIR}/[/green]")
 
 
-def _create_mcp_config(project_root: Path) -> None:
-    """Create or update .mcp.json with lcm server configuration."""
+def _create_mcp_config(project_root: Path) -> str:
+    """Create or update .mcp.json with lcr server configuration.
+
+    Returns:
+        Description of the command that will be used.
+    """
     mcp_config_path = project_root / MCP_CONFIG_FILE
 
     if mcp_config_path.exists():
@@ -300,31 +439,40 @@ def _create_mcp_config(project_root: Path) -> None:
     else:
         mcp_config = {"mcpServers": {}}
 
-    mcp_config["mcpServers"]["lance-code-mcp"] = {
-        "command": "lcm",
-        "args": ["serve"],
-        "env": {"LCM_ROOT": str(project_root)},
+    # Detect how to invoke lcr
+    command, args = _detect_lcr_command()
+
+    mcp_config["mcpServers"]["lance-code-rag"] = {
+        "command": command,
+        "args": args,
+        "env": {"LCR_ROOT": str(project_root)},
     }
 
     with open(mcp_config_path, "w") as f:
         json.dump(mcp_config, f, indent=2)
 
+    # Return description for user feedback
+    if command == "lcr":
+        return "lcr serve"
+    else:
+        return f"{command} {' '.join(args)}"
+
 
 def _update_gitignore(project_root: Path) -> None:
-    """Add .lance-code-mcp/ to .gitignore if not already present."""
+    """Add .lance-code-rag/ to .gitignore if not already present."""
     gitignore_path = project_root / ".gitignore"
-    entry = f"{LCM_DIR}/"
+    entry = f"{LCR_DIR}/"
 
     if gitignore_path.exists():
         content = gitignore_path.read_text()
-        if entry in content or LCM_DIR in content:
+        if entry in content or LCR_DIR in content:
             return  # Already present
         # Append to existing file
         with open(gitignore_path, "a") as f:
-            f.write(f"\n# Lance Code MCP\n{entry}\n")
+            f.write(f"\n# Lance Code RAG\n{entry}\n")
     else:
         # Create new .gitignore
-        gitignore_path.write_text(f"# Lance Code MCP\n{entry}\n")
+        gitignore_path.write_text(f"# Lance Code RAG\n{entry}\n")
 
 
 if __name__ == "__main__":

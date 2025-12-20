@@ -1,4 +1,4 @@
-"""Shared test fixtures for lance-code-mcp."""
+"""Shared test fixtures for lance-code-rag."""
 
 from pathlib import Path
 
@@ -20,8 +20,8 @@ def sample_project():
 
 @pytest.fixture
 def initialized_project(tmp_path, cli_runner):
-    """A temporary project with lcm init already run."""
-    from lance_code_mcp.cli import main
+    """A temporary project with lcr init already run."""
+    from lance_code_rag.cli import main
 
     with cli_runner.isolated_filesystem(temp_dir=tmp_path) as td:
         result = cli_runner.invoke(main, ["init"])

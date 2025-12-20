@@ -6,10 +6,10 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from lance_code_mcp.cli import main
-from lance_code_mcp.config import load_config
-from lance_code_mcp.manifest import load_manifest
-from lance_code_mcp.server import (
+from lance_code_rag.cli import main
+from lance_code_rag.config import load_config
+from lance_code_rag.manifest import load_manifest
+from lance_code_rag.server import (
     ServerState,
     check_staleness,
     fuzzy_find_impl,
@@ -23,7 +23,7 @@ from lance_code_mcp.server import (
 )
 
 # Module-level state reference for tests
-import lance_code_mcp.server as server_module
+import lance_code_rag.server as server_module
 
 
 def init_server_state(project_root: Path) -> None:
@@ -238,7 +238,7 @@ class TestIndexCodebaseTool:
         try:
             os.chdir(project)
 
-            runner.invoke(main, ["init"])
+            runner.invoke(main, ["init", "--no-index"])
 
             init_server_state(project)
 
@@ -356,7 +356,7 @@ class TestResources:
     """Tests for MCP resources."""
 
     def test_status_resource(self, tmp_path: Path, sample_project: Path):
-        """lcm://status returns correct status info."""
+        """lcr://status returns correct status info."""
         runner = CliRunner()
 
         project = tmp_path / "project"
@@ -384,7 +384,7 @@ class TestResources:
             os.chdir(old_cwd)
 
     def test_config_resource(self, tmp_path: Path, sample_project: Path):
-        """lcm://config returns configuration."""
+        """lcr://config returns configuration."""
         runner = CliRunner()
 
         project = tmp_path / "project"
@@ -409,7 +409,7 @@ class TestResources:
             os.chdir(old_cwd)
 
     def test_files_resource(self, tmp_path: Path, sample_project: Path):
-        """lcm://files returns indexed file list."""
+        """lcr://files returns indexed file list."""
         runner = CliRunner()
 
         project = tmp_path / "project"

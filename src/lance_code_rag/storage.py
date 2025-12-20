@@ -1,4 +1,4 @@
-"""LanceDB storage wrapper for Lance Code MCP."""
+"""LanceDB storage wrapper for Lance Code RAG."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,7 +7,7 @@ from typing import Any
 import lancedb
 import pyarrow as pa
 
-from . import LANCEDB_DIR, LCM_DIR
+from . import LANCEDB_DIR, LCR_DIR
 
 
 @dataclass
@@ -71,7 +71,7 @@ class Storage:
     def __init__(self, project_root: Path, dimensions: int = 768):
         self.project_root = project_root
         self.dimensions = dimensions
-        self.db_path = project_root / LCM_DIR / LANCEDB_DIR
+        self.db_path = project_root / LCR_DIR / LANCEDB_DIR
         self._db: lancedb.DBConnection | None = None
 
     def connect(self) -> None:

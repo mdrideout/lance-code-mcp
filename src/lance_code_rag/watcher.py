@@ -1,4 +1,4 @@
-"""File watching for Lance Code MCP."""
+"""File watching for Lance Code RAG."""
 
 # TODO: Implement in Phase 5
 # - watchfiles integration for cross-platform file watching

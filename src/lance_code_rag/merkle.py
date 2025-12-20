@@ -1,4 +1,4 @@
-"""Merkle tree implementation for change detection in Lance Code MCP."""
+"""Merkle tree implementation for change detection in Lance Code RAG."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 # Sample Project
 
-This is a fixture codebase for testing lance-code-mcp.
+This is a fixture codebase for testing lance-code-rag.
 
 ## Structure
 

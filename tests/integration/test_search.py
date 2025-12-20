@@ -6,8 +6,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from lance_code_mcp.cli import main
-from lance_code_mcp.search import SearchEngine, SearchError, run_search
+from lance_code_rag.cli import main
+from lance_code_rag.search import SearchEngine, SearchError, run_search
 
 
 class TestSearchEngine:
@@ -163,7 +163,7 @@ class TestSearchErrors:
             os.chdir(project)
 
             # Initialize but don't index
-            runner.invoke(main, ["init"])
+            runner.invoke(main, ["init", "--no-index"])
 
             # Search should fail with helpful message
             try:
@@ -203,7 +203,7 @@ class TestSearchCLI:
     """Tests for the search CLI command."""
 
     def test_search_command_outputs_results(self, tmp_path: Path, sample_project: Path):
-        """lcm search displays formatted results."""
+        """lcr search displays formatted results."""
         runner = CliRunner()
 
         project = tmp_path / "project"
@@ -226,7 +226,7 @@ class TestSearchCLI:
             os.chdir(old_cwd)
 
     def test_search_with_fuzzy_flag(self, tmp_path: Path, sample_project: Path):
-        """lcm search --fuzzy uses fuzzy matching."""
+        """lcr search --fuzzy uses fuzzy matching."""
         runner = CliRunner()
 
         project = tmp_path / "project"
@@ -248,7 +248,7 @@ class TestSearchCLI:
             os.chdir(old_cwd)
 
     def test_search_with_num_results(self, tmp_path: Path, sample_project: Path):
-        """lcm search -n limits results."""
+        """lcr search -n limits results."""
         runner = CliRunner()
 
         project = tmp_path / "project"

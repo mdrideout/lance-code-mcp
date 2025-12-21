@@ -38,6 +38,12 @@ target-version = "py312"
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/lance_code_rag"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/lance_code_rag/tui/assets" = "lance_code_rag/tui/assets"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

@@ -2,7 +2,8 @@
 .lance-code-rag/
 
 # Claude Code
-.claude/
+.claude/*
+!.claude/commands/
 
 # Python
 __pycache__/

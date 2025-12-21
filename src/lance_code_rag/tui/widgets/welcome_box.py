@@ -10,7 +10,7 @@ from textual.widgets import Static
 
 from lance_code_rag import __version__
 
-from ..banner import BANNER_ASCII, create_gradient_banner
+from ..banner import BANNER_ASCII, create_gradient_banner, get_random_tagline
 
 
 class WelcomeBox(Static):
@@ -45,10 +45,14 @@ class WelcomeBox(Static):
         self._file_count = file_count
         self._project_path = project_path or Path.cwd()
         self._is_initialized = is_initialized
+        # Pick a random tagline once at startup
+        self._tagline = get_random_tagline()
 
     def render(self) -> RenderableType:
-        # Gradient banner - centered, no left border
-        banner_text = create_gradient_banner(BANNER_ASCII, show_info=False, center=True)
+        # Gradient banner - centered, no left border, with random tagline
+        banner_text = create_gradient_banner(
+            BANNER_ASCII, show_info=False, center=True, tagline=self._tagline
+        )
 
         # Info line: version + provider + model + file count
         info_parts = [f"v{__version__}"]

@@ -1,5 +1,6 @@
 """Terminal banner with gradient colors for Lance Code RAG."""
 
+import random
 from pathlib import Path
 
 from rich.console import Console
@@ -10,15 +11,44 @@ from lance_code_rag import __version__
 # Multi-line ASCII art with gradient from lavender (left) to orange (right)
 # Note: No leading border chars - we add those dynamically with Rich
 BANNER_ASCII = [
-    "                                                      ",
+    "                                                                  ",
     "L a n c e  C o d e  R A G",
-    "                                                      ",
-    "                                                  \\\\             ",
+    "                                                                  ",
+    "                                                  \\\\            ",
     "  <=>====>>=========================================████====----  ",
     "                                                  //              ",
-    "                                                      ",
-    "The lance hums with ancient knowledge.",
+    "                                                                  ",
 ]
+
+# Random taglines shown at startup
+TAGLINES = [
+    "Wield the lance. Conquer the codebase.",
+    "An enchanted lance for slaying bugs.",
+    "Quest forth. Slay with the lance.",
+    "The lance chooses the worthy.",
+    "It's dangerous to code alone! Take this.",
+    "Brave coder, take up the lance.",
+    "Arise, coder. Your lance awaits.",
+    "Take up the lance. Begin your quest.",
+    "The lance hums with ancient knowledge.",
+    "By this lance, no bug shall pass.",
+    "The realm of code awaits, brave one.",
+    "A worthy lance for a worthy coder.",
+    "The lance remembers what you forgot.",
+    "The lance whispers forgotten functions.",
+    "Where the lance points, answers follow.",
+    "You found: Enchanted Lance of Context",
+    "Your lance thirsts for bugs.",
+    "A new quest begins. The lance glows.",
+    "Your inventory: one legendary lance.",
+    "Sound the horn. Ready the lance.",
+]
+
+
+def get_random_tagline() -> str:
+    """Get a random tagline for the banner."""
+    return random.choice(TAGLINES)
+
 
 # LanceDB gradient colors (from their website)
 GRADIENT_COLORS = [
@@ -83,6 +113,7 @@ def create_gradient_banner(
     show_info: bool = True,
     center: bool = False,
     width: int = 60,
+    tagline: str | None = None,
 ) -> Text:
     """Create Rich Text banner with horizontal gradient.
 
@@ -92,6 +123,7 @@ def create_gradient_banner(
         show_info: Whether to show version and current directory below
         center: Whether to center the banner content
         width: Width to center within (if center=True)
+        tagline: Optional tagline to display below banner art
     """
     if colors is None:
         colors = GRADIENT_COLORS
@@ -109,6 +141,18 @@ def create_gradient_banner(
         # Add gradient text
         for i, char in enumerate(line):
             position = i / max(max_len - 1, 1)
+            color = get_gradient_color(position, colors)
+            result.append(char, style=f"bold {color}")
+        result.append("\n")
+
+    # Add tagline if provided
+    if tagline:
+        if center:
+            padding = max(0, (width - len(tagline)) // 2)
+            result.append(" " * padding)
+        # Render tagline with gradient
+        for i, char in enumerate(tagline):
+            position = i / max(len(tagline) - 1, 1)
             color = get_gradient_color(position, colors)
             result.append(char, style=f"bold {color}")
         result.append("\n")

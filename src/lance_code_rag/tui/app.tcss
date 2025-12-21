@@ -1,0 +1,69 @@
+/* Lance Code RAG TUI Styles - Mistral Vibe Style */
+
+Screen {
+    background: $surface;
+}
+
+/* Main vertical layout */
+#main {
+    height: 1fr;
+}
+
+/* Chat area - scrollable message flow */
+#chat {
+    height: 1fr;
+    padding: 1 0;
+    /* No border - clean look */
+}
+
+/* Status bar at bottom */
+#status {
+    height: 1;
+    background: $surface-darken-1;
+    padding: 0 2;
+}
+
+/* Welcome box */
+WelcomeBox {
+    margin: 0 0 1 0;
+}
+
+/* Message styling */
+UserQuery {
+    margin: 1 0 0 0;
+    padding: 0 2;
+}
+
+AssistantMessage {
+    padding: 0 2;
+}
+
+StatusMessage {
+    margin: 0 0 1 0;
+    padding: 0 2;
+}
+
+/* Search results */
+SearchResultItem {
+    margin: 0 0 0 2;
+}
+
+CodePreview {
+    margin: 0 2 1 4;
+}
+
+SearchResultsDisplay {
+    padding: 0 2;
+}
+
+/* Help display */
+HelpDisplay {
+    margin: 1 0;
+    padding: 0 2;
+}
+
+/* Indexing progress */
+IndexingProgress {
+    margin: 0 0 1 0;
+    padding: 0 2;
+}

@@ -912,25 +912,51 @@ tests/
 - Fuzzy search on symbol names using SequenceMatcher
 - CLI options: `--fuzzy`, `--bm25-weight`, `-n/--num-results`
 
-### Phase 4: MCP Server ← NEXT
+### Phase 4: Full-Screen TUI ✅ COMPLETE
+- [x] Textual-based full-screen TUI (like Claude Code, Gemini CLI)
+- [x] Gradient banner widget at top
+- [x] Slash command input with history
+- [x] Status panel showing index state on right sidebar
+- [x] Output view with syntax-highlighted search results
+- [x] Auto-launch init wizard when not initialized
+- [x] TUI-only CLI (removed subcommands, all via slash commands)
+
+**Implemented files:**
+- `src/lance_code_rag/tui/app.py` - Main TUI application (LCRApp)
+- `src/lance_code_rag/tui/app.tcss` - Textual CSS styles
+- `src/lance_code_rag/tui/widgets/` - Widget components:
+  - `banner_widget.py` - Gradient banner display
+  - `command_input.py` - Slash command input with history
+  - `status_panel.py` - Right sidebar status display
+  - `output_view.py` - Scrollable results and log output
+- `src/lance_code_rag/cli.py` - Simplified to TUI launcher only
+
+**Slash commands:**
+- `/init` - Initialize project (launches wizard)
+- `/index` - Index or re-index codebase
+- `/search <query>` - Search codebase
+- `/status` - Show detailed status
+- `/clean` - Remove index
+- `/help`, `/clear`, `/quit`
+
+### Phase 5: MCP Server ← NEXT
 - FastMCP server setup
 - All tools implementation
 - Resources and prompts
 - Staleness checking
 
-### Phase 5: File Watching
+### Phase 6: File Watching
 - watchfiles integration
 - Debouncing logic
 - `--watch` mode
 - Server lazy re-index
 
-### Phase 6: Additional Providers
+### Phase 7: Additional Providers
 - OpenAI embeddings
 - Gemini embeddings
 - Provider switching logic
 
-### Phase 7: Polish
-- Rich progress bars
+### Phase 8: Polish
 - Error messages
 - Documentation
 - install.sh script

@@ -27,6 +27,7 @@ lcr = "lance_code_rag.cli:main"
 [dependency-groups]
 dev = [
     "pytest",
+    "pytest-asyncio",
     "ruff",
 ]
 
@@ -44,3 +45,5 @@ packages = ["src/lance_code_rag"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

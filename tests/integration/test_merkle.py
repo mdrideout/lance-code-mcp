@@ -7,7 +7,6 @@ These tests verify that the Merkle tree correctly:
 4. Leaves sibling subtrees unchanged when only one branch is modified
 """
 
-import os
 import shutil
 from pathlib import Path
 
@@ -16,9 +15,8 @@ import pytest
 from lance_code_rag.merkle import (
     MerkleNode,
     MerkleTree,
-    TreeDiff,
-    compute_file_hash,
     compute_directory_hash,
+    compute_file_hash,
     is_binary_file,
     should_exclude,
 )

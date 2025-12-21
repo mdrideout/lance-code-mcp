@@ -1,6 +1,5 @@
 """Tests for the init wizard."""
 
-import pytest
 
 from lance_code_rag.tui import WizardResult
 from lance_code_rag.tui.init_wizard import LOCAL_MODELS

@@ -10,14 +10,14 @@ from lance_code_rag import __version__
 # Multi-line ASCII art with gradient from lavender (left) to orange (right)
 # Note: No leading border chars - we add those dynamically with Rich
 BANNER_ASCII = [
-    "                                                        ",
-    "                                                        ",
-    "      L a n c e  C o d e  R A G       \\\\              ",
-    "  <=>====>>=============================████====----    ",
-    "                                      //                ",
-    "                                                        ",
-    "                                                        ",
-    "  RANDOM TAGLINE HERE                 ",
+    "                                                      ",
+    "L a n c e  C o d e  R A G",
+    "                                                      ",
+    "                                           \\\\             ",
+    "  <=>====>>===================================████====----  ",
+    "                                            //              ",
+    "                                                      ",
+    "The lance hums with ancient knowledge.",
 ]
 
 # LanceDB gradient colors (from their website)
@@ -81,13 +81,17 @@ def create_gradient_banner(
     lines: list[str],
     colors: list[str] | None = None,
     show_info: bool = True,
+    center: bool = False,
+    width: int = 60,
 ) -> Text:
-    """Create Rich Text banner with horizontal gradient and left border.
+    """Create Rich Text banner with horizontal gradient.
 
     Args:
         lines: Lines of ASCII art to render with gradient
         colors: Gradient colors to use
         show_info: Whether to show version and current directory below
+        center: Whether to center the banner content
+        width: Width to center within (if center=True)
     """
     if colors is None:
         colors = GRADIENT_COLORS
@@ -97,8 +101,11 @@ def create_gradient_banner(
 
     # Render ASCII art lines with gradient
     for line in lines:
-        # Add left border
-        result.append(BORDER_CHAR + " ", style=BORDER_STYLE)
+        # Center the line if requested
+        if center:
+            padding = max(0, (width - len(line)) // 2)
+            result.append(" " * padding)
+
         # Add gradient text
         for i, char in enumerate(line):
             position = i / max(max_len - 1, 1)
@@ -108,17 +115,17 @@ def create_gradient_banner(
 
     # Add info lines below (gray, no gradient)
     if show_info:
-        # Empty lines for spacing
-        result.append(BORDER_CHAR + "\n", style=BORDER_STYLE)
+        # Empty line for spacing
+        result.append("\n")
         # Version
-        result.append(BORDER_CHAR + "   ", style=BORDER_STYLE)
+        result.append("   ")
         result.append(f"v{__version__}\n", style="dim")
         # Current directory
-        result.append(BORDER_CHAR + "   ", style=BORDER_STYLE)
+        result.append("   ")
         cwd = str(Path.cwd())
         result.append(f"{cwd}\n", style="dim")
         # Empty line for spacing
-        result.append(BORDER_CHAR + "\n", style=BORDER_STYLE)
+        result.append("\n")
 
     return result
 

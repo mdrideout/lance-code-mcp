@@ -737,7 +737,7 @@ requires-dist = [
     { name = "lancedb", specifier = ">=0.15.0" },
     { name = "pydantic" },
     { name = "rich" },
-    { name = "textual", specifier = ">=6.0.0" },
+    { name = "textual", specifier = ">=6.11.0" },
     { name = "tree-sitter", specifier = ">=0.23.0" },
     { name = "tree-sitter-python", specifier = ">=0.23.0" },
 ]

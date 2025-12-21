@@ -18,7 +18,7 @@ dependencies = [
     "tree-sitter-python>=0.23.0",
     "fastembed>=0.4.0",
     "fastmcp>=2.14.1",
-    "textual>=6.0.0",
+    "textual>=6.11.0",
 ]
 
 [project.scripts]
@@ -40,9 +40,6 @@ ignore = ["E501"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lance_code_rag"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/lance_code_rag/tui/assets" = "lance_code_rag/tui/assets"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

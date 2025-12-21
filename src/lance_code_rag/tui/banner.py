@@ -112,7 +112,7 @@ def create_gradient_banner(
     colors: list[str] | None = None,
     show_info: bool = True,
     center: bool = False,
-    width: int = 60,
+    width: int | None = None,
     tagline: str | None = None,
 ) -> Text:
     """Create Rich Text banner with horizontal gradient.
@@ -121,8 +121,8 @@ def create_gradient_banner(
         lines: Lines of ASCII art to render with gradient
         colors: Gradient colors to use
         show_info: Whether to show version and current directory below
-        center: Whether to center the banner content
-        width: Width to center within (if center=True)
+        center: Whether to center shorter lines within the banner width
+        width: Width to center within (if None, uses max line length)
         tagline: Optional tagline to display below banner art
     """
     if colors is None:
@@ -131,11 +131,15 @@ def create_gradient_banner(
     result = Text()
     max_len = max(len(line) for line in lines)
 
+    # Use max line length as the centering width if not specified
+    if width is None:
+        width = max_len
+
     # Render ASCII art lines with gradient
     for line in lines:
-        # Center the line if requested
-        if center:
-            padding = max(0, (width - len(line)) // 2)
+        # Center shorter lines within the banner width
+        if center and len(line) < width:
+            padding = (width - len(line)) // 2
             result.append(" " * padding)
 
         # Add gradient text
@@ -147,8 +151,9 @@ def create_gradient_banner(
 
     # Add tagline if provided
     if tagline:
-        if center:
-            padding = max(0, (width - len(tagline)) // 2)
+        # Center tagline within banner width
+        if center and len(tagline) < width:
+            padding = (width - len(tagline)) // 2
             result.append(" " * padding)
         # Render tagline with gradient
         for i, char in enumerate(tagline):

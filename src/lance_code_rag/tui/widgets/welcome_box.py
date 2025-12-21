@@ -49,7 +49,8 @@ class WelcomeBox(Static):
         self._tagline = get_random_tagline()
 
     def render(self) -> RenderableType:
-        # Gradient banner - centered, no left border, with random tagline
+        # Gradient banner with random tagline
+        # center=True centers shorter lines (title, tagline) within banner width
         banner_text = create_gradient_banner(
             BANNER_ASCII, show_info=False, center=True, tagline=self._tagline
         )

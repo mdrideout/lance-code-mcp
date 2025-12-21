@@ -292,3 +292,74 @@ class TestChatArea:
 
             # Should not crash
             assert app.is_running
+
+
+class TestInitWizard:
+    """Tests for the init wizard flow."""
+
+    @pytest.mark.asyncio
+    async def test_init_command_pushes_wizard_screen(self, tmp_path: Path):
+        """Running /init pushes the wizard screen."""
+        app = LCRApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            input_widget = app.query_one("#input", SearchInput)
+            input_widget.text = "/init"
+            await pilot.press("enter")
+            await pilot.pause()
+
+            # Wizard screen should be pushed - check we have a ProviderScreen
+            from lance_code_rag.tui.init_wizard import ProviderScreen
+
+            screens = list(app.screen_stack)
+            assert len(screens) >= 2  # Default screen + wizard screen
+            assert isinstance(screens[-1], ProviderScreen)
+
+    @pytest.mark.asyncio
+    async def test_wizard_cancel_returns_to_main(self, tmp_path: Path):
+        """Canceling the wizard returns to the main app."""
+        app = LCRApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            input_widget = app.query_one("#input", SearchInput)
+            input_widget.text = "/init"
+            await pilot.press("enter")
+            await pilot.pause()
+
+            # Press Cancel button
+            await pilot.click("#cancel")
+            await pilot.pause()
+
+            # Should be back to main screen
+            from lance_code_rag.tui.init_wizard import ProviderScreen
+
+            screens = list(app.screen_stack)
+            assert not any(isinstance(s, ProviderScreen) for s in screens)
+            assert app.is_running
+            assert app.is_initialized is False  # Still not initialized
+
+    @pytest.mark.asyncio
+    async def test_wizard_complete_initializes_project(self, tmp_path: Path):
+        """Completing the wizard initializes the project."""
+        app = LCRApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            input_widget = app.query_one("#input", SearchInput)
+            input_widget.text = "/init"
+            await pilot.press("enter")
+            await pilot.pause()
+
+            # Step 1: Provider screen - click Continue (Local is default)
+            await pilot.click("#continue")
+            await pilot.pause()
+
+            # Step 2: Model screen - click Continue (bge-base is default)
+            await pilot.click("#continue")
+            await pilot.pause()
+
+            # Step 3: Confirm screen - click Initialize
+            await pilot.click("#init")
+            await pilot.pause()
+            # Wait for indexing to start
+            await pilot.pause()
+
+            # Project should be initialized (or initializing)
+            lcr_dir = tmp_path / ".lance-code-rag"
+            assert lcr_dir.exists() or app.is_initialized

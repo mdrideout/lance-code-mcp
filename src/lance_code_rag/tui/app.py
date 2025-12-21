@@ -17,7 +17,7 @@ from ..config import LCRConfig, get_lcr_dir, load_config, save_config
 from ..indexer import run_index
 from ..manifest import Manifest, create_empty_manifest, load_manifest, save_manifest
 from ..search import SearchEngine, SearchError
-from .init_wizard import InitWizardApp, WizardResult
+from .init_wizard import ProviderScreen, WizardResult
 from .widgets import ChatArea, SearchInput, StatusBar
 
 
@@ -118,32 +118,23 @@ class LCRApp(App):
             is_initialized=self.is_initialized,
         )
 
-    async def _launch_init_wizard(self) -> None:
-        """Launch the init wizard."""
-        chat = self.query_one("#chat", ChatArea)
-        chat.show_assistant_message("Project not initialized. Launching setup wizard...")
+    def _launch_init_wizard(self, auto_index: bool = True) -> None:
+        """Launch the init wizard by pushing screens onto the main app."""
+        self._wizard_auto_index = auto_index
 
-        try:
-            result = await asyncio.to_thread(self._run_wizard_sync)
-        except Exception as e:
-            chat.show_status(f"Wizard error: {e}", success=False)
-            chat.show_assistant_message("Run /init to try again.", style="dim")
-            return
+        def on_wizard_complete(result: WizardResult) -> None:
+            """Handle wizard completion."""
+            if result.cancelled:
+                chat = self.query_one("#chat", ChatArea)
+                chat.show_status("Setup cancelled", success=False)
+                chat.show_assistant_message("Run /init when ready.", style="dim")
+            else:
+                # Schedule the async init to run
+                self.call_later(lambda: asyncio.create_task(
+                    self._do_init(result, auto_index=self._wizard_auto_index)
+                ))
 
-        if result.cancelled:
-            chat.show_status("Setup cancelled", success=False)
-            chat.show_assistant_message("Run /init when ready.", style="dim")
-        else:
-            await self._do_init(result, auto_index=True)
-
-    def _run_wizard_sync(self) -> WizardResult:
-        """Run the wizard app synchronously (for use with to_thread)."""
-        try:
-            app = InitWizardApp()
-            result = app.run()
-            return result if result else WizardResult(cancelled=True)
-        except Exception as e:
-            raise RuntimeError(f"Wizard failed: {e}") from e
+        self.push_screen(ProviderScreen(on_wizard_complete))
 
     async def _do_init(self, result: WizardResult, auto_index: bool = False) -> None:
         """Perform initialization with wizard result."""
@@ -243,17 +234,7 @@ class LCRApp(App):
             return
 
         chat.show_assistant_message("Launching setup wizard...")
-
-        try:
-            result = await asyncio.to_thread(self._run_wizard_sync)
-        except Exception as e:
-            chat.show_status(f"Wizard error: {e}", success=False)
-            return
-
-        if result.cancelled:
-            chat.show_status("Setup cancelled", success=False)
-        else:
-            await self._do_init(result, auto_index=True)
+        self._launch_init_wizard(auto_index=True)
 
     async def _handle_search(self, query: str) -> None:
         """Handle /search command."""

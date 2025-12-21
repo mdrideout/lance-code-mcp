@@ -1,11 +1,15 @@
-"""Init wizard using Textual."""
+"""Init wizard screens for Lance Code RAG.
 
+These screens are designed to be pushed onto the main app's screen stack,
+not run as a separate Textual app (which doesn't work with nested apps).
+"""
+
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from rich.panel import Panel
 from rich.syntax import Syntax
-from textual.app import App, ComposeResult
-from textual.binding import Binding
+from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Label, RadioButton, RadioSet, Static
@@ -21,20 +25,51 @@ class WizardResult:
     cancelled: bool = False
 
 
+# Callback type for wizard completion
+WizardCallback = Callable[[WizardResult], None]
+
+# (display_name, model_id, widget_id, dimensions)
 LOCAL_MODELS = [
-    ("bge-small (~33MB, 384 dim) - fastest", "BAAI/bge-small-en-v1.5", 384),
-    ("bge-base (~130MB, 768 dim) - recommended", "BAAI/bge-base-en-v1.5", 768),
-    ("bge-large (~330MB, 1024 dim) - highest quality", "BAAI/bge-large-en-v1.5", 1024),
+    ("bge-small (~33MB, 384 dim) - fastest", "BAAI/bge-small-en-v1.5", "bge-small", 384),
+    ("bge-base (~130MB, 768 dim) - recommended", "BAAI/bge-base-en-v1.5", "bge-base", 768),
+    ("bge-large (~330MB, 1024 dim) - highest quality", "BAAI/bge-large-en-v1.5", "bge-large", 1024),
 ]
+
+
+CSS = """
+#wizard-content {
+    align: center middle;
+    padding: 2;
+}
+.wizard-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+.wizard-buttons {
+    margin-top: 2;
+}
+.wizard-buttons Button {
+    margin-right: 1;
+}
+RadioSet {
+    margin: 1 0;
+}
+"""
 
 
 class ProviderScreen(Screen):
     """Select embedding provider."""
 
+    CSS = CSS
+
+    def __init__(self, on_complete: WizardCallback) -> None:
+        super().__init__()
+        self._on_complete = on_complete
+
     def compose(self) -> ComposeResult:
         yield Header()
         yield Vertical(
-            Label("Select embedding provider:", classes="title"),
+            Label("Select embedding provider:", classes="wizard-title"),
             RadioSet(
                 RadioButton(
                     "Local (FastEmbed) - runs entirely on your machine",
@@ -48,71 +83,83 @@ class ProviderScreen(Screen):
             Horizontal(
                 Button("Continue", variant="primary", id="continue"),
                 Button("Cancel", id="cancel"),
-                classes="buttons",
+                classes="wizard-buttons",
             ),
-            id="content",
+            id="wizard-content",
         )
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
-            self.app.exit(WizardResult(cancelled=True))
+            self.app.pop_screen()
+            self._on_complete(WizardResult(cancelled=True))
         elif event.button.id == "continue":
             radio_set = self.query_one("#provider-set", RadioSet)
             selected = radio_set.pressed_button
             if selected:
                 provider = selected.id
                 if provider == "local":
-                    self.app.push_screen(ModelScreen())
+                    self.app.switch_screen(ModelScreen(self._on_complete))
                 else:
-                    self.app.push_screen(ComingSoonScreen(provider))
+                    self.app.switch_screen(ComingSoonScreen(provider, self._on_complete))
 
 
 class ModelScreen(Screen):
     """Select local embedding model."""
 
+    CSS = CSS
+
+    def __init__(self, on_complete: WizardCallback) -> None:
+        super().__init__()
+        self._on_complete = on_complete
+
     def compose(self) -> ComposeResult:
         yield Header()
         yield Vertical(
-            Label("Select embedding model:", classes="title"),
+            Label("Select embedding model:", classes="wizard-title"),
             RadioSet(
                 *[
-                    RadioButton(name, id=value, value=(i == 1))  # bge-base default
-                    for i, (name, value, _) in enumerate(LOCAL_MODELS)
+                    RadioButton(name, id=widget_id, value=(i == 1))  # bge-base default
+                    for i, (name, _, widget_id, _) in enumerate(LOCAL_MODELS)
                 ],
                 id="model-set",
             ),
             Horizontal(
                 Button("Continue", variant="primary", id="continue"),
                 Button("Back", id="back"),
-                classes="buttons",
+                classes="wizard-buttons",
             ),
-            id="content",
+            id="wizard-content",
         )
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "back":
-            self.app.pop_screen()
+            self.app.switch_screen(ProviderScreen(self._on_complete))
         elif event.button.id == "continue":
             radio_set = self.query_one("#model-set", RadioSet)
             selected = radio_set.pressed_button
             if selected:
-                model = selected.id
-                dims = next(d for _, v, d in LOCAL_MODELS if v == model)
-                self.app.push_screen(ConfirmScreen("local", model, dims))
+                widget_id = selected.id
+                # Find the model by widget_id
+                model_id, dims = next(
+                    (m, d) for _, m, w, d in LOCAL_MODELS if w == widget_id
+                )
+                self.app.switch_screen(ConfirmScreen("local", model_id, dims, self._on_complete))
 
 
 class ComingSoonScreen(Screen):
     """Cloud provider coming soon message."""
 
-    def __init__(self, provider: str):
+    CSS = CSS
+
+    def __init__(self, provider: str, on_complete: WizardCallback) -> None:
         super().__init__()
-        self.provider = provider
+        self._provider = provider
+        self._on_complete = on_complete
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        key_name = f"{self.provider.upper()}_API_KEY"
+        key_name = f"{self._provider.upper()}_API_KEY"
         json_example = f"""\
 {{
   "mcpServers": {{
@@ -123,42 +170,49 @@ class ComingSoonScreen(Screen):
     }}
   }}
 }}"""
+        yield Header()
         yield Vertical(
-            Label(f"{self.provider.title()} - Coming Soon!", classes="title"),
+            Label(f"{self._provider.title()} - Coming Soon!", classes="wizard-title"),
             Static(
-                f"{self.provider.title()} embeddings will be available in a future release.\n\n"
+                f"{self._provider.title()} embeddings will be available in a future release.\n\n"
                 "To prepare, add your API key to .mcp.json:"
             ),
             Static(Panel(Syntax(json_example, "json", theme="monokai"))),
             Horizontal(
                 Button("Use Local Instead", variant="primary", id="use-local"),
                 Button("Cancel", id="cancel"),
-                classes="buttons",
+                classes="wizard-buttons",
             ),
-            id="content",
+            id="wizard-content",
         )
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
-            self.app.exit(WizardResult(cancelled=True))
+            self.app.pop_screen()
+            self._on_complete(WizardResult(cancelled=True))
         elif event.button.id == "use-local":
-            self.app.switch_screen(ModelScreen())
+            self.app.switch_screen(ModelScreen(self._on_complete))
 
 
 class ConfirmScreen(Screen):
     """Confirm and start initialization."""
 
-    def __init__(self, provider: str, model: str, dimensions: int):
+    CSS = CSS
+
+    def __init__(
+        self, provider: str, model: str, dimensions: int, on_complete: WizardCallback
+    ) -> None:
         super().__init__()
         self._provider = provider
         self._model = model
         self._dimensions = dimensions
+        self._on_complete = on_complete
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield Vertical(
-            Label("Ready to Initialize", classes="title"),
+            Label("Ready to Initialize", classes="wizard-title"),
             Static(
                 f"Provider: Local (FastEmbed)\n"
                 f"Model: {self._model}\n"
@@ -172,69 +226,23 @@ class ConfirmScreen(Screen):
                 Button("Initialize", variant="success", id="init"),
                 Button("Back", id="back"),
                 Button("Cancel", id="cancel"),
-                classes="buttons",
+                classes="wizard-buttons",
             ),
-            id="content",
+            id="wizard-content",
         )
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
-            self.app.exit(WizardResult(cancelled=True))
-        elif event.button.id == "back":
             self.app.pop_screen()
+            self._on_complete(WizardResult(cancelled=True))
+        elif event.button.id == "back":
+            self.app.switch_screen(ModelScreen(self._on_complete))
         elif event.button.id == "init":
-            self.app.exit(
-                WizardResult(
-                    provider=self._provider,
-                    model=self._model,
-                    dimensions=self._dimensions,
-                )
+            result = WizardResult(
+                provider=self._provider,
+                model=self._model,
+                dimensions=self._dimensions,
             )
-
-
-class InitWizardApp(App):
-    """Init wizard application."""
-
-    TITLE = "Lance Code RAG Setup"
-
-    CSS = """
-    #content {
-        align: center middle;
-        padding: 2;
-    }
-    .title {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    .buttons {
-        margin-top: 2;
-    }
-    Button {
-        margin-right: 1;
-    }
-    RadioSet {
-        margin: 1 0;
-    }
-    """
-
-    BINDINGS = [
-        Binding("q", "quit", "Quit"),
-        Binding("escape", "quit", "Quit"),
-    ]
-
-    def on_mount(self) -> None:
-        self.push_screen(ProviderScreen())
-
-    def action_quit(self) -> None:
-        self.exit(WizardResult(cancelled=True))
-
-
-def run_init_wizard() -> WizardResult:
-    """Run the init wizard and return the result."""
-    app = InitWizardApp()
-    result = app.run()
-    # Handle case where app exits without returning a result
-    if result is None:
-        return WizardResult(cancelled=True)
-    return result
+            self.app.pop_screen()
+            self._on_complete(result)

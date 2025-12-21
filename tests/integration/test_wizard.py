@@ -43,21 +43,22 @@ class TestLocalModels:
         assert len(LOCAL_MODELS) == 3
 
     def test_model_structure(self):
-        """Each model has (name, id, dimensions)."""
-        for name, model_id, dimensions in LOCAL_MODELS:
+        """Each model has (name, model_id, widget_id, dimensions)."""
+        for name, model_id, widget_id, dimensions in LOCAL_MODELS:
             assert isinstance(name, str)
             assert "bge" in name.lower()
             assert model_id.startswith("BAAI/bge-")
+            assert widget_id.startswith("bge-")
             assert dimensions in (384, 768, 1024)
 
     def test_bge_base_is_recommended(self):
         """bge-base should be the recommended model."""
-        names = [name for name, _, _ in LOCAL_MODELS]
+        names = [name for name, _, _, _ in LOCAL_MODELS]
         recommended = [n for n in names if "recommended" in n.lower()]
         assert len(recommended) == 1
         assert "bge-base" in recommended[0]
 
     def test_model_sizes_increasing(self):
         """Models are ordered from smallest to largest dimensions."""
-        dimensions = [d for _, _, d in LOCAL_MODELS]
+        dimensions = [d for _, _, _, d in LOCAL_MODELS]
         assert dimensions == sorted(dimensions)

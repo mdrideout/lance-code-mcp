@@ -294,72 +294,185 @@ class TestChatArea:
             assert app.is_running
 
 
-class TestInitWizard:
-    """Tests for the init wizard flow."""
+class TestInlineInit:
+    """Tests for inline init wizard flow."""
 
     @pytest.mark.asyncio
-    async def test_init_command_pushes_wizard_screen(self, tmp_path: Path):
-        """Running /init pushes the wizard screen."""
-        app = LCRApp(project_root=tmp_path)
+    async def test_init_already_initialized(self, tmp_path: Path, sample_project: Path):
+        """Init command shows message when already initialized."""
+        project = tmp_path / "project"
+        shutil.copytree(sample_project, project)
+        setup_lcr_project(project)
+
+        app = LCRApp(project_root=project)
         async with app.run_test() as pilot:
             input_widget = app.query_one("#input", SearchInput)
             input_widget.text = "/init"
             await pilot.press("enter")
             await pilot.pause()
 
-            # Wizard screen should be pushed - check we have a ProviderScreen
-            from lance_code_rag.tui.init_wizard import ProviderScreen
-
-            screens = list(app.screen_stack)
-            assert len(screens) >= 2  # Default screen + wizard screen
-            assert isinstance(screens[-1], ProviderScreen)
-
-    @pytest.mark.asyncio
-    async def test_wizard_cancel_returns_to_main(self, tmp_path: Path):
-        """Canceling the wizard returns to the main app."""
-        app = LCRApp(project_root=tmp_path)
-        async with app.run_test() as pilot:
-            input_widget = app.query_one("#input", SearchInput)
-            input_widget.text = "/init"
-            await pilot.press("enter")
-            await pilot.pause()
-
-            # Press Cancel button
-            await pilot.click("#cancel")
-            await pilot.pause()
-
-            # Should be back to main screen
-            from lance_code_rag.tui.init_wizard import ProviderScreen
-
-            screens = list(app.screen_stack)
-            assert not any(isinstance(s, ProviderScreen) for s in screens)
+            # Should not crash, stays initialized
             assert app.is_running
-            assert app.is_initialized is False  # Still not initialized
+            assert app.is_initialized is True
+
+
+class TestInlinePromptWidget:
+    """Tests for InlinePrompt widget keyboard navigation (Mistral Vibe pattern)."""
 
     @pytest.mark.asyncio
-    async def test_wizard_complete_initializes_project(self, tmp_path: Path):
-        """Completing the wizard initializes the project."""
-        app = LCRApp(project_root=tmp_path)
+    async def test_inline_prompt_renders_options(self, tmp_path: Path):
+        """InlinePrompt renders with options display."""
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+
+        from lance_code_rag.tui.widgets import InlinePrompt
+
+        class TestApp(App):
+            def compose(self) -> ComposeResult:
+                yield InlinePrompt(
+                    "Select provider:",
+                    [("local", "Local"), ("openai", "OpenAI"), ("gemini", "Gemini")],
+                )
+
+        app = TestApp()
         async with app.run_test() as pilot:
-            input_widget = app.query_one("#input", SearchInput)
-            input_widget.text = "/init"
+            prompt = app.query_one(InlinePrompt)
+            assert prompt is not None
+            assert len(prompt._options) == 3
+
+            # Check options display exists
+            options_display = prompt.query_one("#options-display", Static)
+            assert options_display is not None
+
+    @pytest.mark.asyncio
+    async def test_inline_prompt_keyboard_navigation(self, tmp_path: Path):
+        """InlinePrompt responds to up/down arrow keys."""
+        from textual.app import App, ComposeResult
+
+        from lance_code_rag.tui.widgets import InlinePrompt
+
+        class TestApp(App):
+            def compose(self) -> ComposeResult:
+                yield InlinePrompt(
+                    "Select provider:",
+                    [("local", "Local"), ("openai", "OpenAI"), ("gemini", "Gemini")],
+                )
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            prompt = app.query_one(InlinePrompt)
+
+            # Verify initial state
+            assert prompt._selected_index == 0
+
+            # Navigate down
+            await pilot.press("down")
+            await pilot.pause()
+            assert prompt._selected_index == 1
+
+            # Navigate down again
+            await pilot.press("down")
+            await pilot.pause()
+            assert prompt._selected_index == 2
+
+            # Navigate up
+            await pilot.press("up")
+            await pilot.pause()
+            assert prompt._selected_index == 1
+
+    @pytest.mark.asyncio
+    async def test_inline_prompt_enter_selects(self, tmp_path: Path):
+        """Pressing Enter on InlinePrompt posts Selected message."""
+        from textual.app import App, ComposeResult
+
+        from lance_code_rag.tui.widgets import InlinePrompt
+
+        selected_value = None
+
+        class TestApp(App):
+            def compose(self) -> ComposeResult:
+                yield InlinePrompt(
+                    "Select provider:",
+                    [("local", "Local"), ("openai", "OpenAI")],
+                )
+
+            def on_inline_prompt_selected(
+                self, event: InlinePrompt.Selected
+            ) -> None:
+                nonlocal selected_value
+                selected_value = event.value
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            # Press enter on first option
             await pilot.press("enter")
             await pilot.pause()
 
-            # Step 1: Provider screen - click Continue (Local is default)
-            await pilot.click("#continue")
+            assert selected_value == "local"
+
+    @pytest.mark.asyncio
+    async def test_inline_prompt_escape_cancels(self, tmp_path: Path):
+        """Pressing Escape on InlinePrompt posts Cancelled message."""
+        from textual.app import App, ComposeResult
+
+        from lance_code_rag.tui.widgets import InlinePrompt
+
+        cancelled = False
+
+        class TestApp(App):
+            def compose(self) -> ComposeResult:
+                yield InlinePrompt(
+                    "Select provider:",
+                    [("local", "Local"), ("openai", "OpenAI")],
+                )
+
+            def on_inline_prompt_cancelled(
+                self, event: InlinePrompt.Cancelled
+            ) -> None:
+                nonlocal cancelled
+                cancelled = True
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            await pilot.press("escape")
             await pilot.pause()
 
-            # Step 2: Model screen - click Continue (bge-base is default)
-            await pilot.click("#continue")
+            assert cancelled is True
+
+    @pytest.mark.asyncio
+    async def test_inline_prompt_default_index(self, tmp_path: Path):
+        """InlinePrompt respects default_index parameter."""
+        from textual.app import App, ComposeResult
+
+        from lance_code_rag.tui.widgets import InlinePrompt
+
+        class TestApp(App):
+            def compose(self) -> ComposeResult:
+                yield InlinePrompt(
+                    "Select model:",
+                    [("small", "Small"), ("base", "Base"), ("large", "Large")],
+                    default_index=1,  # Should highlight "Base"
+                )
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            prompt = app.query_one(InlinePrompt)
+            assert prompt._selected_index == 1
+
+
+class TestRemoveCommand:
+    """Tests for /remove command."""
+
+    @pytest.mark.asyncio
+    async def test_remove_not_initialized(self, tmp_path: Path):
+        """Remove command fails when not initialized."""
+        app = LCRApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            input_widget = app.query_one("#input", SearchInput)
+            input_widget.text = "/remove"
+            await pilot.press("enter")
             await pilot.pause()
 
-            # Step 3: Confirm screen - click Initialize
-            await pilot.click("#init")
-            await pilot.pause()
-            # Wait for indexing to start
-            await pilot.pause()
-
-            # Project should be initialized (or initializing)
-            lcr_dir = tmp_path / ".lance-code-rag"
-            assert lcr_dir.exists() or app.is_initialized
+            # Should show error, not crash
+            assert app.is_running
+            assert app.is_initialized is False

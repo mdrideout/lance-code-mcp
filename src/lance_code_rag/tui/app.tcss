@@ -2,14 +2,10 @@
 
 Screen {
     background: $surface;
+    /* Widgets are direct children of Screen - no wrapper container */
 }
 
-/* Main vertical layout */
-#main {
-    height: 1fr;
-}
-
-/* Chat area - scrollable message flow */
+/* Chat area - scrollable message flow (takes remaining space) */
 #chat {
     height: 1fr;
     padding: 1 0;
@@ -21,6 +17,11 @@ Screen {
     height: 1;
     background: $surface-darken-1;
     padding: 0 2;
+}
+
+/* Search input at bottom */
+#input {
+    height: auto;
 }
 
 /* Welcome box */

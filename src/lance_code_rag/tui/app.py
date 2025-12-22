@@ -1,15 +1,15 @@
 """Main TUI application for Lance Code RAG - Mistral Vibe style."""
 
 import asyncio
+import json
 import shutil
 import time
 from pathlib import Path
 
 from rich.table import Table
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
 from textual.reactive import reactive
 
 from .. import LCR_DIR
@@ -17,8 +17,23 @@ from ..config import LCRConfig, get_lcr_dir, load_config, save_config
 from ..indexer import run_index
 from ..manifest import Manifest, create_empty_manifest, load_manifest, save_manifest
 from ..search import SearchEngine, SearchError
-from .init_wizard import ProviderScreen, WizardResult
+from .screens import SelectionScreen
 from .widgets import ChatArea, SearchInput, StatusBar
+
+
+# Embedding provider options
+PROVIDERS = [
+    ("local", "Local (FastEmbed) - runs on your machine"),
+    ("openai", "OpenAI (coming soon)"),
+    ("gemini", "Gemini (coming soon)"),
+]
+
+# Local embedding model options: (id, display, model_name, dimensions)
+LOCAL_MODELS = [
+    ("bge-small", "bge-small (~33MB) - fastest", "BAAI/bge-small-en-v1.5", 384),
+    ("bge-base", "bge-base (~130MB) - recommended", "BAAI/bge-base-en-v1.5", 768),
+    ("bge-large", "bge-large (~330MB) - highest quality", "BAAI/bge-large-en-v1.5", 1024),
+]
 
 
 class LCRApp(App):
@@ -55,18 +70,18 @@ class LCRApp(App):
         return self._search_engine
 
     def compose(self) -> ComposeResult:
-        """Create the simplified app layout."""
-        with Vertical(id="main"):
-            yield ChatArea(project_path=self.project_root, id="chat")
-            yield StatusBar(project_path=self.project_root, id="status")
-            yield SearchInput(id="input")
+        """Create app layout with widgets directly at Screen level."""
+        yield ChatArea(project_path=self.project_root, id="chat")
+        yield StatusBar(project_path=self.project_root, id="status")
+        yield SearchInput(id="input")
 
     async def on_mount(self) -> None:
         """Handle app mount - check initialization and show welcome."""
         self._check_initialized()
 
-        # Focus the input by default
-        self.query_one("#input", SearchInput).focus()
+        # Focus the search input
+        search_input = self.query_one("#input", SearchInput)
+        self.call_after_refresh(search_input.focus)
 
         # Update status bar
         self._update_status_bar()
@@ -118,72 +133,31 @@ class LCRApp(App):
             is_initialized=self.is_initialized,
         )
 
-    def _launch_init_wizard(self, auto_index: bool = True) -> None:
-        """Launch the init wizard by pushing screens onto the main app."""
-        self._wizard_auto_index = auto_index
+    async def _prompt_selection(
+        self,
+        title: str,
+        options: list[tuple[str, str]],
+        default_index: int = 0,
+    ) -> str | None:
+        """Show modal selection screen and return the selected value.
 
-        def on_wizard_complete(result: WizardResult) -> None:
-            """Handle wizard completion."""
-            if result.cancelled:
-                chat = self.query_one("#chat", ChatArea)
-                chat.show_status("Setup cancelled", success=False)
-                chat.show_assistant_message("Run /init when ready.", style="dim")
-            else:
-                # Schedule the async init to run
-                self.call_later(lambda: asyncio.create_task(
-                    self._do_init(result, auto_index=self._wizard_auto_index)
-                ))
+        Uses Textual's ModalScreen pattern which automatically handles
+        focus isolation - the screen captures all input until dismissed.
 
-        self.push_screen(ProviderScreen(on_wizard_complete))
+        IMPORTANT: This method must be called from a @work decorated method,
+        not directly from an @on event handler. Awaiting inside an event handler
+        blocks the event loop and prevents keyboard events from reaching the modal.
+        """
+        future: asyncio.Future[str | None] = asyncio.Future()
 
-    async def _do_init(self, result: WizardResult, auto_index: bool = False) -> None:
-        """Perform initialization with wizard result."""
-        chat = self.query_one("#chat", ChatArea)
+        def on_dismiss(result: str | None) -> None:
+            if not future.done():
+                future.set_result(result)
 
-        try:
-            chat.show_assistant_message(
-                f"Initializing with {result.provider} provider..."
-            )
+        screen = SelectionScreen(title, options, default_index)
+        self.push_screen(screen, on_dismiss)
 
-            # Create config
-            config = LCRConfig(
-                embedding_provider=result.provider,
-                embedding_model=result.model,
-                embedding_dimensions=result.dimensions,
-            )
-
-            # Create directories and save config
-            lcr_dir = get_lcr_dir(self.project_root)
-            lcr_dir.mkdir(parents=True, exist_ok=True)
-            save_config(config, self.project_root)
-
-            # Create empty manifest
-            manifest = create_empty_manifest()
-            save_manifest(manifest, self.project_root)
-
-            # Update .gitignore
-            self._update_gitignore()
-
-            self.is_initialized = True
-            self._config = config
-            self._manifest = manifest
-
-            chat.show_status("Initialized successfully!")
-            self._update_status_bar()
-
-            # Update welcome box
-            chat.update_welcome(
-                config=config,
-                stats=manifest.stats,
-                is_initialized=True,
-            )
-
-            if auto_index:
-                chat.show_assistant_message("Starting initial indexing...")
-                await self._run_indexing(force=False)
-
-        except Exception as e:
-            chat.show_status(f"Initialization failed: {e}", success=False)
+        return await future
 
     def _update_gitignore(self) -> None:
         """Add .lance-code-rag to .gitignore if not present."""
@@ -199,11 +173,22 @@ class LCRApp(App):
             gitignore_path.write_text(entry.lstrip())
 
     @on(SearchInput.CommandSubmitted)
-    async def handle_command(self, event: SearchInput.CommandSubmitted) -> None:
-        """Dispatch slash commands to handlers."""
+    def handle_command(self, event: SearchInput.CommandSubmitted) -> None:
+        """Dispatch slash commands to handlers.
+
+        Note: This is NOT async to avoid blocking the event loop.
+        Handlers that need to show modal dialogs use @work decorator.
+        """
         cmd = event.command
-        handlers = {
-            "/init": self._handle_init,
+
+        # Commands that use modal screens need @work decorator (non-blocking)
+        work_handlers = {
+            "/init": self._handle_init_worker,
+            "/remove": self._handle_remove_worker,
+        }
+
+        # Simple async commands that don't block on modal screens
+        async_handlers = {
             "/index": self._handle_index,
             "/search": self._handle_search,
             "/status": self._handle_status,
@@ -214,27 +199,140 @@ class LCRApp(App):
             "/quit": self._handle_quit,
         }
 
-        handler = handlers.get(cmd.command)
-        if handler:
-            await handler(cmd.args)
+        if cmd.command in work_handlers:
+            # These are @work decorated - just call them (they schedule themselves)
+            work_handlers[cmd.command](cmd.args)
+        elif cmd.command in async_handlers:
+            # These are simple async - use run_worker
+            self.run_worker(async_handlers[cmd.command](cmd.args))
         else:
             chat = self.query_one("#chat", ChatArea)
             chat.show_status(f"Unknown command: {cmd.command}", success=False)
             chat.show_assistant_message("Type /help for available commands.", style="dim")
 
-    async def _handle_init(self, args: str) -> None:
-        """Handle /init command."""
+    @work(exclusive=True)
+    async def _handle_init_worker(self, args: str) -> None:
+        """Handle /init command as a worker (non-blocking).
+
+        Using @work decorator ensures this runs without blocking the event loop,
+        allowing modal screens to receive keyboard input.
+        """
         chat = self.query_one("#chat", ChatArea)
 
         if self.is_initialized and "--force" not in args:
             chat.show_status("Already initialized", success=False)
-            chat.show_assistant_message(
-                "Use /init --force to reinitialize.", style="dim"
-            )
+            chat.show_assistant_message("Use /init --force to reinitialize.", style="dim")
             return
 
-        chat.show_assistant_message("Launching setup wizard...")
-        self._launch_init_wizard(auto_index=True)
+        chat.show_assistant_message("Initializing lance-code-rag...")
+
+        # Step 1: Select provider
+        provider = await self._prompt_selection(
+            "Select embedding provider:",
+            PROVIDERS,
+        )
+        if provider is None:
+            chat.show_status("Setup cancelled", success=False)
+            return
+
+        if provider != "local":
+            chat.show_status(f"{provider.title()} coming soon!", success=False)
+            chat.show_assistant_message("Only local embeddings are available currently.")
+            return
+
+        chat.show_status(f"Provider: {provider}")
+
+        # Step 2: Select model (for local provider)
+        model_options = [(m[0], m[1]) for m in LOCAL_MODELS]
+        model_id = await self._prompt_selection(
+            "Select embedding model:",
+            model_options,
+            default_index=1,  # bge-base recommended
+        )
+        if model_id is None:
+            chat.show_status("Setup cancelled", success=False)
+            return
+
+        # Get model details
+        model_info = next((m for m in LOCAL_MODELS if m[0] == model_id), None)
+        if not model_info:
+            chat.show_status("Invalid model selection", success=False)
+            return
+
+        _, _, model_name, dimensions = model_info
+        chat.show_status(f"Model: {model_id}")
+
+        # Step 3: Initialize
+        try:
+            chat.show_assistant_message("Creating config...")
+
+            # Create config
+            config = LCRConfig(
+                embedding_provider=provider,
+                embedding_model=model_name,
+                embedding_dimensions=dimensions,
+            )
+
+            # Create directories and save config
+            lcr_dir = get_lcr_dir(self.project_root)
+            lcr_dir.mkdir(parents=True, exist_ok=True)
+            save_config(config, self.project_root)
+
+            # Create empty manifest
+            manifest = create_empty_manifest()
+            save_manifest(manifest, self.project_root)
+
+            # Update .gitignore
+            self._update_gitignore()
+
+            # Update .mcp.json
+            self._update_mcp_config()
+
+            self.is_initialized = True
+            self._config = config
+            self._manifest = manifest
+
+            chat.show_status("Config saved!")
+            self._update_status_bar()
+
+            # Update welcome box
+            chat.update_welcome(
+                config=config,
+                stats=manifest.stats,
+                is_initialized=True,
+            )
+
+            # Auto-index
+            chat.show_assistant_message("Starting initial indexing...")
+            await self._run_indexing(force=False)
+
+        except Exception as e:
+            chat.show_status(f"Initialization failed: {e}", success=False)
+
+    def _update_mcp_config(self) -> None:
+        """Add lance-code-rag to .mcp.json if not present."""
+        mcp_path = self.project_root / ".mcp.json"
+        config_entry = {
+            "command": "lcr",
+            "args": ["serve"],
+            "env": {
+                "LCR_ROOT": str(self.project_root),
+            },
+        }
+
+        try:
+            if mcp_path.exists():
+                content = json.loads(mcp_path.read_text())
+            else:
+                content = {"mcpServers": {}}
+
+            if "mcpServers" not in content:
+                content["mcpServers"] = {}
+
+            content["mcpServers"]["lance-code-rag"] = config_entry
+            mcp_path.write_text(json.dumps(content, indent=2) + "\n")
+        except Exception:
+            pass  # Non-critical, don't fail init
 
     async def _handle_search(self, query: str) -> None:
         """Handle /search command."""
@@ -389,9 +487,7 @@ class LCRApp(App):
 
         if "--confirm" not in args:
             chat.show_status("This will remove all index data", success=False)
-            chat.show_assistant_message(
-                "Run /clean --confirm to proceed.", style="dim"
-            )
+            chat.show_assistant_message("Run /clean --confirm to proceed.", style="dim")
             return
 
         try:
@@ -408,9 +504,114 @@ class LCRApp(App):
         except Exception as e:
             chat.show_status(f"Clean failed: {e}", success=False)
 
+    @work(exclusive=True)
+    async def _handle_remove_worker(self, args: str) -> None:
+        """Handle /remove command as a worker (non-blocking).
+
+        Using @work decorator ensures this runs without blocking the event loop,
+        allowing modal screens to receive keyboard input.
+        """
+        chat = self.query_one("#chat", ChatArea)
+
+        if not self.is_initialized:
+            chat.show_status("Not initialized - nothing to remove", success=False)
+            return
+
+        chat.show_assistant_message("Remove lance-code-rag from this project?")
+
+        # Confirmation prompt
+        confirm = await self._prompt_selection(
+            "This will remove:",
+            [
+                ("yes", "Yes, remove completely"),
+                ("no", "No, cancel"),
+            ],
+        )
+
+        if confirm != "yes":
+            chat.show_status("Removal cancelled", success=False)
+            return
+
+        # Execute removal with progress
+        try:
+            # 1. Remove .lance-code-rag/ directory
+            chat.show_assistant_message("Removing .lance-code-rag/ directory...")
+            lcr_dir = get_lcr_dir(self.project_root)
+            if lcr_dir.exists():
+                shutil.rmtree(lcr_dir)
+            chat.show_status("Directory removed!")
+
+            # 2. Remove from .gitignore
+            chat.show_assistant_message("Cleaning .gitignore...")
+            self._remove_gitignore_entry()
+            chat.show_status("Gitignore cleaned!")
+
+            # 3. Remove from .mcp.json
+            chat.show_assistant_message("Cleaning .mcp.json...")
+            self._remove_mcp_config()
+            chat.show_status("MCP config cleaned!")
+
+            # Reset state
+            self.is_initialized = False
+            self._config = None
+            self._manifest = None
+            self._search_engine = None
+
+            chat.show_status("Removal complete!", success=True)
+            self._update_status_bar()
+
+            # Show not-initialized welcome
+            chat.show_welcome(is_initialized=False)
+
+        except Exception as e:
+            chat.show_status(f"Removal failed: {e}", success=False)
+
+    def _remove_gitignore_entry(self) -> None:
+        """Remove .lance-code-rag from .gitignore."""
+        gitignore_path = self.project_root / ".gitignore"
+        if not gitignore_path.exists():
+            return
+
+        lines = gitignore_path.read_text().splitlines(keepends=True)
+        new_lines = []
+        skip_next = False
+
+        for line in lines:
+            # Skip the comment and the entry
+            if "# Lance Code RAG" in line:
+                skip_next = True
+                continue
+            if skip_next and LCR_DIR in line:
+                skip_next = False
+                continue
+            skip_next = False
+            new_lines.append(line)
+
+        # Write back, removing trailing empty lines
+        content = "".join(new_lines).rstrip() + "\n" if new_lines else ""
+        gitignore_path.write_text(content)
+
+    def _remove_mcp_config(self) -> None:
+        """Remove lance-code-rag from .mcp.json."""
+        mcp_path = self.project_root / ".mcp.json"
+        if not mcp_path.exists():
+            return
+
+        try:
+            content = json.loads(mcp_path.read_text())
+            if "mcpServers" in content and "lance-code-rag" in content["mcpServers"]:
+                del content["mcpServers"]["lance-code-rag"]
+
+                # If no servers left, remove the file
+                if not content["mcpServers"]:
+                    mcp_path.unlink()
+                else:
+                    mcp_path.write_text(json.dumps(content, indent=2) + "\n")
+        except Exception:
+            pass  # Non-critical
+
     async def _handle_terminal_setup(self, args: str) -> None:
         """Handle /terminal-setup command - configure VS Code for Shift+Enter."""
-        import json
         import os
 
         chat = self.query_one("#chat", ChatArea)
@@ -429,8 +630,11 @@ class LCRApp(App):
 
         # Find VS Code keybindings.json
         import sys
+
         if sys.platform == "darwin":
-            keybindings_path = Path.home() / "Library/Application Support/Code/User/keybindings.json"
+            keybindings_path = (
+                Path.home() / "Library/Application Support/Code/User/keybindings.json"
+            )
         elif sys.platform == "win32":
             keybindings_path = Path(os.environ.get("APPDATA", "")) / "Code/User/keybindings.json"
         else:  # Linux

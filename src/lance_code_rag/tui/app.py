@@ -4,10 +4,11 @@ import asyncio
 import json
 import shutil
 import time
+from enum import StrEnum, auto
 from pathlib import Path
 
 from rich.table import Table
-from textual import on, work
+from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
@@ -17,8 +18,14 @@ from ..config import LCRConfig, get_lcr_dir, load_config, save_config
 from ..indexer import run_index
 from ..manifest import Manifest, create_empty_manifest, load_manifest, save_manifest
 from ..search import SearchEngine, SearchError
-from .screens import SelectionScreen
-from .widgets import ChatArea, SearchInput, StatusBar
+from .widgets import ChatArea, InlineSelector, SearchInput, StatusBar
+
+
+class BottomApp(StrEnum):
+    """Which widget is currently in the bottom input area."""
+
+    Input = auto()
+    Selector = auto()
 
 
 # Embedding provider options
@@ -61,6 +68,13 @@ class LCRApp(App):
         # Track Ctrl+C timing for two-stage quit
         self._ctrl_c_time: float = 0.0
         self._ctrl_c_timer: object | None = None  # Timer to reset status message
+
+        # Bottom app swapping state (Mistral Vibe pattern)
+        self._current_bottom_app = BottomApp.Input
+
+        # Multi-step flow state (for /init, /remove)
+        # Keys: "flow" (e.g., "init", "remove"), plus flow-specific state
+        self._flow_state: dict = {}
 
     @property
     def search_engine(self) -> SearchEngine:
@@ -133,31 +147,92 @@ class LCRApp(App):
             is_initialized=self.is_initialized,
         )
 
-    async def _prompt_selection(
+    # ─────────────────────────────────────────────────────────────────────
+    # Bottom App Swapping (Mistral Vibe pattern)
+    # ─────────────────────────────────────────────────────────────────────
+
+    async def _switch_to_selector(
         self,
         title: str,
         options: list[tuple[str, str]],
         default_index: int = 0,
-    ) -> str | None:
-        """Show modal selection screen and return the selected value.
+    ) -> None:
+        """Switch from input to inline selector.
 
-        Uses Textual's ModalScreen pattern which automatically handles
-        focus isolation - the screen captures all input until dismissed.
-
-        IMPORTANT: This method must be called from a @work decorated method,
-        not directly from an @on event handler. Awaiting inside an event handler
-        blocks the event loop and prevents keyboard events from reaching the modal.
+        The selector replaces the search input at the bottom of the screen.
+        When the user makes a selection or cancels, InlineSelector posts
+        a message which we handle to restore the input and continue the flow.
         """
-        future: asyncio.Future[str | None] = asyncio.Future()
+        if self._current_bottom_app == BottomApp.Selector:
+            # Already showing a selector - remove it first
+            try:
+                old_selector = self.query_one("#selector", InlineSelector)
+                await old_selector.remove()
+            except Exception:
+                pass
 
-        def on_dismiss(result: str | None) -> None:
-            if not future.done():
-                future.set_result(result)
+        # Remove search input
+        try:
+            search_input = self.query_one("#input", SearchInput)
+            await search_input.remove()
+        except Exception:
+            pass
 
-        screen = SelectionScreen(title, options, default_index)
-        self.push_screen(screen, on_dismiss)
+        # Mount selector
+        selector = InlineSelector(title, options, default_index, id="selector")
+        await self.mount(selector)
+        self._current_bottom_app = BottomApp.Selector
+        self.call_after_refresh(selector.focus)
 
-        return await future
+    async def _switch_to_input(self) -> None:
+        """Switch from selector back to search input."""
+        if self._current_bottom_app == BottomApp.Input:
+            return
+
+        # Remove selector
+        try:
+            selector = self.query_one("#selector", InlineSelector)
+            await selector.remove()
+        except Exception:
+            pass
+
+        # Mount search input
+        search_input = SearchInput(id="input")
+        await self.mount(search_input)
+        self._current_bottom_app = BottomApp.Input
+        self.call_after_refresh(search_input.focus)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # InlineSelector Message Handlers
+    # ─────────────────────────────────────────────────────────────────────
+
+    @on(InlineSelector.OptionSelected)
+    async def _on_option_selected(self, event: InlineSelector.OptionSelected) -> None:
+        """Handle option selection from inline selector."""
+        flow = self._flow_state.get("flow")
+
+        if flow == "init":
+            await self._handle_init_selection(event.value)
+        elif flow == "remove":
+            await self._handle_remove_selection(event.value)
+        else:
+            # Unknown flow - just restore input
+            await self._switch_to_input()
+            self._flow_state = {}
+
+    @on(InlineSelector.SelectionCancelled)
+    async def _on_selection_cancelled(
+        self, event: InlineSelector.SelectionCancelled
+    ) -> None:
+        """Handle selection cancellation."""
+        chat = self.query_one("#chat", ChatArea)
+        flow = self._flow_state.get("flow")
+
+        if flow:
+            chat.show_status(f"{flow.title()} cancelled", success=False)
+
+        await self._switch_to_input()
+        self._flow_state = {}
 
     def _update_gitignore(self) -> None:
         """Add .lance-code-rag to .gitignore if not present."""
@@ -176,19 +251,15 @@ class LCRApp(App):
     def handle_command(self, event: SearchInput.CommandSubmitted) -> None:
         """Dispatch slash commands to handlers.
 
-        Note: This is NOT async to avoid blocking the event loop.
-        Handlers that need to show modal dialogs use @work decorator.
+        Commands that show inline selectors use the bottom app swapping pattern.
+        Other commands are simple async handlers.
         """
         cmd = event.command
 
-        # Commands that use modal screens need @work decorator (non-blocking)
-        work_handlers = {
-            "/init": self._handle_init_worker,
-            "/remove": self._handle_remove_worker,
-        }
-
-        # Simple async commands that don't block on modal screens
+        # All commands are now async handlers (no @work needed with inline pattern)
         async_handlers = {
+            "/init": self._handle_init,
+            "/remove": self._handle_remove,
             "/index": self._handle_index,
             "/search": self._handle_search,
             "/status": self._handle_status,
@@ -199,24 +270,19 @@ class LCRApp(App):
             "/quit": self._handle_quit,
         }
 
-        if cmd.command in work_handlers:
-            # These are @work decorated - just call them (they schedule themselves)
-            work_handlers[cmd.command](cmd.args)
-        elif cmd.command in async_handlers:
-            # These are simple async - use run_worker
+        if cmd.command in async_handlers:
             self.run_worker(async_handlers[cmd.command](cmd.args))
         else:
             chat = self.query_one("#chat", ChatArea)
             chat.show_status(f"Unknown command: {cmd.command}", success=False)
             chat.show_assistant_message("Type /help for available commands.", style="dim")
 
-    @work(exclusive=True)
-    async def _handle_init_worker(self, args: str) -> None:
-        """Handle /init command as a worker (non-blocking).
+    # ─────────────────────────────────────────────────────────────────────
+    # /init Flow (multi-step inline selection)
+    # ─────────────────────────────────────────────────────────────────────
 
-        Using @work decorator ensures this runs without blocking the event loop,
-        allowing modal screens to receive keyboard input.
-        """
+    async def _handle_init(self, args: str) -> None:
+        """Start the /init flow - shows first inline selector."""
         chat = self.query_one("#chat", ChatArea)
 
         if self.is_initialized and "--force" not in args:
@@ -226,43 +292,66 @@ class LCRApp(App):
 
         chat.show_assistant_message("Initializing lance-code-rag...")
 
-        # Step 1: Select provider
-        provider = await self._prompt_selection(
-            "Select embedding provider:",
-            PROVIDERS,
-        )
-        if provider is None:
-            chat.show_status("Setup cancelled", success=False)
-            return
+        # Start init flow - step 1: select provider
+        self._flow_state = {"flow": "init", "step": "provider"}
+        await self._switch_to_selector("Select embedding provider:", PROVIDERS)
 
-        if provider != "local":
-            chat.show_status(f"{provider.title()} coming soon!", success=False)
-            chat.show_assistant_message("Only local embeddings are available currently.")
-            return
+    async def _handle_init_selection(self, value: str) -> None:
+        """Handle selections during the /init flow."""
+        chat = self.query_one("#chat", ChatArea)
+        step = self._flow_state.get("step")
 
-        chat.show_status(f"Provider: {provider}")
+        if step == "provider":
+            # Provider selected
+            if value != "local":
+                chat.show_status(f"{value.title()} coming soon!", success=False)
+                chat.show_assistant_message("Only local embeddings are available currently.")
+                await self._switch_to_input()
+                self._flow_state = {}
+                return
 
-        # Step 2: Select model (for local provider)
-        model_options = [(m[0], m[1]) for m in LOCAL_MODELS]
-        model_id = await self._prompt_selection(
-            "Select embedding model:",
-            model_options,
-            default_index=1,  # bge-base recommended
-        )
-        if model_id is None:
-            chat.show_status("Setup cancelled", success=False)
-            return
+            chat.show_status(f"Provider: {value}")
+            self._flow_state["provider"] = value
 
-        # Get model details
-        model_info = next((m for m in LOCAL_MODELS if m[0] == model_id), None)
-        if not model_info:
-            chat.show_status("Invalid model selection", success=False)
-            return
+            # Step 2: select model
+            self._flow_state["step"] = "model"
+            model_options = [(m[0], m[1]) for m in LOCAL_MODELS]
+            await self._switch_to_selector(
+                "Select embedding model:",
+                model_options,
+                default_index=1,  # bge-base recommended
+            )
 
-        _, _, model_name, dimensions = model_info
-        chat.show_status(f"Model: {model_id}")
+        elif step == "model":
+            # Model selected - finish init
+            model_id = value
+            model_info = next((m for m in LOCAL_MODELS if m[0] == model_id), None)
+            if not model_info:
+                chat.show_status("Invalid model selection", success=False)
+                await self._switch_to_input()
+                self._flow_state = {}
+                return
 
-        # Step 3: Initialize
+            _, _, model_name, dimensions = model_info
+            chat.show_status(f"Model: {model_id}")
+
+            # Restore input before continuing
+            await self._switch_to_input()
+
+            # Complete initialization
+            await self._complete_init(
+                provider=self._flow_state.get("provider", "local"),
+                model_name=model_name,
+                dimensions=dimensions,
+            )
+            self._flow_state = {}
+
+    async def _complete_init(
+        self, provider: str, model_name: str, dimensions: int
+    ) -> None:
+        """Complete the initialization after selections are made."""
+        chat = self.query_one("#chat", ChatArea)
+
         try:
             chat.show_assistant_message("Creating config...")
 
@@ -504,13 +593,12 @@ class LCRApp(App):
         except Exception as e:
             chat.show_status(f"Clean failed: {e}", success=False)
 
-    @work(exclusive=True)
-    async def _handle_remove_worker(self, args: str) -> None:
-        """Handle /remove command as a worker (non-blocking).
+    # ─────────────────────────────────────────────────────────────────────
+    # /remove Flow (single-step inline selection)
+    # ─────────────────────────────────────────────────────────────────────
 
-        Using @work decorator ensures this runs without blocking the event loop,
-        allowing modal screens to receive keyboard input.
-        """
+    async def _handle_remove(self, args: str) -> None:
+        """Start the /remove flow - shows confirmation selector."""
         chat = self.query_one("#chat", ChatArea)
 
         if not self.is_initialized:
@@ -519,8 +607,9 @@ class LCRApp(App):
 
         chat.show_assistant_message("Remove lance-code-rag from this project?")
 
-        # Confirmation prompt
-        confirm = await self._prompt_selection(
+        # Start remove flow
+        self._flow_state = {"flow": "remove"}
+        await self._switch_to_selector(
             "This will remove:",
             [
                 ("yes", "Yes, remove completely"),
@@ -528,7 +617,15 @@ class LCRApp(App):
             ],
         )
 
-        if confirm != "yes":
+    async def _handle_remove_selection(self, value: str) -> None:
+        """Handle selection during the /remove flow."""
+        chat = self.query_one("#chat", ChatArea)
+
+        # Restore input first
+        await self._switch_to_input()
+        self._flow_state = {}
+
+        if value != "yes":
             chat.show_status("Removal cancelled", success=False)
             return
 

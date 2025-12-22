@@ -912,32 +912,44 @@ tests/
 - Fuzzy search on symbol names using SequenceMatcher
 - CLI options: `--fuzzy`, `--bm25-weight`, `-n/--num-results`
 
-### Phase 4: Full-Screen TUI ✅ COMPLETE
+### Phase 4: Full-Screen TUI 🔄 IN PROGRESS
 - [x] Textual-based full-screen TUI (like Claude Code, Gemini CLI)
-- [x] Gradient banner widget at top
-- [x] Slash command input with history
-- [x] Status panel showing index state on right sidebar
-- [x] Output view with syntax-highlighted search results
-- [x] Auto-launch init wizard when not initialized
+- [x] ASCII art banner widget at top with random taglines
+- [x] Slash command input with history and multiline support
+- [x] Status bar showing index state at bottom
+- [x] Chat-style output with syntax-highlighted search results
+- [x] Inline selection widgets (Mistral Vibe "bottom app swapping" pattern)
+- [ ] **E2E validation of /init flow** ← PENDING
+- [ ] E2E validation of /remove flow
 - [x] TUI-only CLI (removed subcommands, all via slash commands)
 
 **Implemented files:**
-- `src/lance_code_rag/tui/app.py` - Main TUI application (LCRApp)
+- `src/lance_code_rag/tui/app.py` - Main TUI application (LCRApp) with bottom app swapping
 - `src/lance_code_rag/tui/app.tcss` - Textual CSS styles
+- `src/lance_code_rag/tui/banner.py` - ASCII banner with gradient colors
 - `src/lance_code_rag/tui/widgets/` - Widget components:
-  - `banner_widget.py` - Gradient banner display
-  - `command_input.py` - Slash command input with history
-  - `status_panel.py` - Right sidebar status display
-  - `output_view.py` - Scrollable results and log output
+  - `chat_area.py` - Scrollable chat message area
+  - `inline_selector.py` - Inline selection widget (replaces input during prompts)
+  - `messages.py` - Message display widgets (UserQuery, AssistantMessage, etc.)
+  - `search_input.py` - Command input with history and multiline
+  - `status_bar.py` - Bottom status bar
+  - `welcome_box.py` - Welcome box with project stats
 - `src/lance_code_rag/cli.py` - Simplified to TUI launcher only
 
 **Slash commands:**
-- `/init` - Initialize project (launches wizard)
+- `/init` - Initialize project (inline wizard with provider/model selection)
 - `/index` - Index or re-index codebase
 - `/search <query>` - Search codebase
 - `/status` - Show detailed status
-- `/clean` - Remove index
+- `/remove` - Remove lance-code-rag from project
+- `/clean` - Remove index data only
 - `/help`, `/clear`, `/quit`
+
+**Key patterns:**
+- Bottom app swapping: InlineSelector replaces SearchInput during prompts
+- Message-based communication: Widgets post messages, app handles them
+- Flow state machine: Multi-step wizards tracked via `_flow_state` dict
+- See `AGENTS.md` for detailed pattern documentation
 
 ### Phase 5: MCP Server ← NEXT
 - FastMCP server setup

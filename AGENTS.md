@@ -15,81 +15,97 @@
 
 ---
 
-## CRITICAL GOTCHAS
+## UI Pattern: Bottom App Swapping (Mistral Vibe Style)
 
-### 1. The @work Decorator Issue
+We use **inline widget swapping** instead of modal screens. This keeps the chat context visible while presenting selection prompts.
 
-**Problem**: `await` inside `@on` event handlers blocks the Textual event loop.
+### How It Works
 
-**Symptom**: Modal screens/prompts appear but keyboard input never arrives. App appears frozen.
-
-**Solution**: Use `@work(exclusive=True)` decorator on handlers that await user input.
+1. **State Tracking**: `BottomApp` enum tracks what's in the input area (Input or Selector)
+2. **Widget Swapping**: Remove current widget, mount new one
+3. **Message Communication**: Widgets post messages when done, parent handles them
+4. **Focus Management**: `can_focus=True`, `on_blur()` recaptures focus
 
 ```python
-# BAD - blocks event loop, keyboard input never reaches modal
-@on(SearchInput.CommandSubmitted)
-async def handle_command(self, event):
-    result = await self._prompt_selection(...)  # BLOCKS!
+# Switch from input to inline selector
+async def _switch_to_selector(self, title, options):
+    # Remove search input
+    search_input = self.query_one("#input", SearchInput)
+    await search_input.remove()
 
-# GOOD - @work runs in separate task, event loop stays responsive
-@on(SearchInput.CommandSubmitted)
-def handle_command(self, event):
-    self._handle_init_worker(event.args)  # Calls @work method
+    # Mount selector
+    selector = InlineSelector(title, options, id="selector")
+    await self.mount(selector)
+    self._current_bottom_app = BottomApp.Selector
+    self.call_after_refresh(selector.focus)
 
-@work(exclusive=True)
-async def _handle_init_worker(self, args):
-    result = await self._prompt_selection(...)  # Works!
+# Handle selection via message
+@on(InlineSelector.OptionSelected)
+async def _on_option_selected(self, event):
+    # Process selection, then restore input
+    await self._switch_to_input()
 ```
 
-### 2. Testing Gotcha
+### Multi-Step Flows
+
+For wizards like `/init` that need multiple selections:
+
+```python
+# Track flow state
+self._flow_state = {"flow": "init", "step": "provider"}
+
+# Each selection advances the flow
+async def _handle_init_selection(self, value):
+    step = self._flow_state.get("step")
+
+    if step == "provider":
+        # Store selection, show next selector
+        self._flow_state["provider"] = value
+        self._flow_state["step"] = "model"
+        await self._switch_to_selector("Select model:", model_options)
+
+    elif step == "model":
+        # All done - restore input and complete
+        await self._switch_to_input()
+        await self._complete_init(...)
+        self._flow_state = {}
+```
+
+---
+
+## CRITICAL GOTCHAS
+
+### 1. Testing Gotcha
 
 - `run_test()` with Pilot is **headless simulation** - may not catch real terminal issues
 - Always test with actual terminal (`uv run lcr`) when debugging keyboard/focus problems
 
----
+### 2. Historical: The @work Decorator Issue
 
-## UI Style Preference: Inline Over Modal
+> **Note**: This is now historical context. We've refactored to inline widgets which avoid this issue entirely.
 
-**PREFER inline chat interfaces** that keep the conversation flow visible:
-- Mistral Vibe uses "bottom app swapping" - widgets mounted inline, not modal overlays
-- User stays in chat context, sees previous messages while making selections
-- See `MISTRAL_ARCHITECTURE.md` → "Bottom App Pattern" for the full pattern
+**Problem**: `await` inside `@on` event handlers blocks the Textual event loop.
 
-**When ModalScreen is acceptable:**
-- When inline focus management becomes unreliable
-- For truly modal confirmations (destructive actions)
+**Old Solution**: Use `@work(exclusive=True)` decorator for handlers that await modal screens.
 
-**Current State & Future Work:**
-- `SelectionScreen` uses ModalScreen due to inline focus issues we hit
-- **TODO**: Investigate if @work + proper focus management enables inline prompts
-- **Goal**: Refactor to inline "bottom app swapping" pattern like Mistral Vibe
-
-**Inline Widget Pattern (Mistral Vibe Style):**
-```python
-# Swap widgets in a container - NOT overlay modals
-async def _switch_to_selection(self):
-    container = self.query_one("#bottom-app-container")
-    await self.query_one("#input").remove()      # Remove old widget
-    await container.mount(SelectionWidget(...))  # Mount new widget
-    self.call_after_refresh(new_widget.focus)    # Focus after refresh
-```
+**Current Solution**: Use inline widgets with message-based communication. No `await` needed in handlers since widgets post messages when done.
 
 ---
 
 ## Pattern Cheat Sheet
 
 ### DO:
-- **Prefer inline prompts** over modal screens when focus management works
-- Use `@work(exclusive=True)` for handlers that await user input
-- Use widget replacement pattern (remove + mount) not visibility toggle
+- Use inline widget swapping (remove + mount) for selection prompts
 - Use `call_after_refresh(widget.focus)` after mounting
+- Use `can_focus=True` + `can_focus_children=False` on interactive widgets
+- Use `on_blur()` to recapture focus during selection
+- Use `post_message()` for widget → parent communication
 - Use declarative `BINDINGS` with `action_*` methods
 - Yield widgets directly at Screen level (no wrapper container)
-- Use `can_focus=True` + `can_focus_children=False` on interactive containers
-- Use `on_blur()` to recapture focus if needed
+- Track multi-step flow state in a dict
 
 ### DON'T:
-- Don't `await` inside `@on` decorated event handlers (blocks keyboard input)
+- Don't use ModalScreen for selection prompts (use inline widgets)
 - Don't toggle visibility (`display=False`) - remove and mount widgets instead
 - Don't nest focusable widgets without `can_focus_children=False`
 - Don't rely solely on `run_test()` - test in real terminal for input issues
@@ -100,22 +116,22 @@ async def _switch_to_selection(self):
 
 ```
 src/lance_code_rag/tui/
-├── app.py              # Main LCRApp - command handlers, @work patterns
+├── app.py              # Main LCRApp - bottom app swapping, flow handlers
 ├── app.tcss            # Textual CSS styles
-├── screens/
-│   └── selection_screen.py   # ModalScreen for selection prompts
 └── widgets/
-    ├── chat_area.py    # Scrollable message area
-    ├── search_input.py # Command input with slash commands
-    ├── status_bar.py   # Bottom status bar
-    ├── welcome_box.py  # ASCII art welcome banner
-    └── messages.py     # Message display widgets
+    ├── inline_selector.py  # Inline selection widget (replaces input)
+    ├── chat_area.py        # Scrollable message area
+    ├── search_input.py     # Command input with slash commands
+    ├── status_bar.py       # Bottom status bar
+    ├── welcome_box.py      # ASCII art welcome banner
+    └── messages.py         # Message display widgets
 ```
 
 **Key Files to Study:**
-- `app.py:188` - `handle_command()` showing @work pattern
-- `app.py:226` - `_handle_init_worker()` with @work decorator
-- `app.py:136` - `_prompt_selection()` with Future/callback pattern
+- `app.py:150` - `_switch_to_selector()` and `_switch_to_input()` methods
+- `app.py:209` - `_on_option_selected()` message handler
+- `app.py:284` - `_handle_init()` starting the init flow
+- `inline_selector.py` - Complete inline selection widget pattern
 
 ---
 
@@ -141,11 +157,11 @@ src/lance_code_rag/tui/
 ## Reference Documentation
 
 ### Textual Docs (Critical Pages)
-- **Workers**: https://textual.textualize.io/guide/workers/ (CRITICAL for async handlers)
-- **Screens**: https://textual.textualize.io/guide/screens/
 - **Input/Focus**: https://textual.textualize.io/guide/input/
 - **Actions/Bindings**: https://textual.textualize.io/guide/actions/
 - **Widgets**: https://textual.textualize.io/guide/widgets/
+- **Messages**: https://textual.textualize.io/guide/events/
+- **Workers**: https://textual.textualize.io/guide/workers/ (if you need async tasks)
 
 ---
 
@@ -162,23 +178,9 @@ See `MISTRAL_ARCHITECTURE.md` for detailed Mistral Vibe analysis (800+ lines) co
 
 ## Quick Patterns
 
-### ModalScreen with Future/Callback
+### InlineSelector Widget
 ```python
-async def _prompt_selection(self, title, options):
-    future = asyncio.Future()
-
-    def on_dismiss(result):
-        future.set_result(result)
-
-    screen = SelectionScreen(title, options)
-    self.push_screen(screen, on_dismiss)
-
-    return await future  # Only works inside @work method!
-```
-
-### Interactive Widget with Focus
-```python
-class SelectionWidget(Container):
+class InlineSelector(Vertical):
     can_focus = True
     can_focus_children = False
 
@@ -189,6 +191,15 @@ class SelectionWidget(Container):
         Binding("escape", "cancel", show=False),
     ]
 
+    class OptionSelected(Message):
+        def __init__(self, value: str, label: str):
+            self.value = value
+            self.label = label
+            super().__init__()
+
+    class SelectionCancelled(Message):
+        pass
+
     def on_mount(self):
         self._update_display()
         self.focus()
@@ -198,5 +209,29 @@ class SelectionWidget(Container):
         self.call_after_refresh(self.focus)
 
     def action_select(self):
-        self.post_message(self.Selected(self.value))
+        value, label = self._options[self._selected_index]
+        self.post_message(self.OptionSelected(value, label))
+
+    def action_cancel(self):
+        self.post_message(self.SelectionCancelled())
+```
+
+### Flow State Machine
+```python
+# Start flow
+self._flow_state = {"flow": "init", "step": "provider"}
+await self._switch_to_selector("Select provider:", options)
+
+# Handle message
+@on(InlineSelector.OptionSelected)
+async def _on_option_selected(self, event):
+    flow = self._flow_state.get("flow")
+    if flow == "init":
+        await self._handle_init_selection(event.value)
+
+# On cancel, restore input
+@on(InlineSelector.SelectionCancelled)
+async def _on_cancelled(self, event):
+    await self._switch_to_input()
+    self._flow_state = {}
 ```

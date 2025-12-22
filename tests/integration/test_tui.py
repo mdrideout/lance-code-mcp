@@ -316,88 +316,83 @@ class TestInlineInit:
             assert app.is_initialized is True
 
 
-class TestInlinePromptWidget:
-    """Tests for InlinePrompt widget keyboard navigation (Mistral Vibe pattern)."""
+class TestInlineSelectorWidget:
+    """Tests for InlineSelector widget keyboard navigation (Mistral Vibe pattern)."""
 
     @pytest.mark.asyncio
-    async def test_inline_prompt_renders_options(self, tmp_path: Path):
-        """InlinePrompt renders with options display."""
+    async def test_inline_selector_renders_options(self, tmp_path: Path):
+        """InlineSelector renders with options display."""
         from textual.app import App, ComposeResult
-        from textual.widgets import Static
 
-        from lance_code_rag.tui.widgets import InlinePrompt
+        from lance_code_rag.tui.widgets import InlineSelector
 
         class TestApp(App):
             def compose(self) -> ComposeResult:
-                yield InlinePrompt(
+                yield InlineSelector(
                     "Select provider:",
                     [("local", "Local"), ("openai", "OpenAI"), ("gemini", "Gemini")],
                 )
 
         app = TestApp()
         async with app.run_test() as pilot:
-            prompt = app.query_one(InlinePrompt)
-            assert prompt is not None
-            assert len(prompt._options) == 3
-
-            # Check options display exists
-            options_display = prompt.query_one("#options-display", Static)
-            assert options_display is not None
+            selector = app.query_one(InlineSelector)
+            assert selector is not None
+            assert len(selector._options) == 3
 
     @pytest.mark.asyncio
-    async def test_inline_prompt_keyboard_navigation(self, tmp_path: Path):
-        """InlinePrompt responds to up/down arrow keys."""
+    async def test_inline_selector_keyboard_navigation(self, tmp_path: Path):
+        """InlineSelector responds to up/down arrow keys."""
         from textual.app import App, ComposeResult
 
-        from lance_code_rag.tui.widgets import InlinePrompt
+        from lance_code_rag.tui.widgets import InlineSelector
 
         class TestApp(App):
             def compose(self) -> ComposeResult:
-                yield InlinePrompt(
+                yield InlineSelector(
                     "Select provider:",
                     [("local", "Local"), ("openai", "OpenAI"), ("gemini", "Gemini")],
                 )
 
         app = TestApp()
         async with app.run_test() as pilot:
-            prompt = app.query_one(InlinePrompt)
+            selector = app.query_one(InlineSelector)
 
             # Verify initial state
-            assert prompt._selected_index == 0
+            assert selector._selected_index == 0
 
             # Navigate down
             await pilot.press("down")
             await pilot.pause()
-            assert prompt._selected_index == 1
+            assert selector._selected_index == 1
 
             # Navigate down again
             await pilot.press("down")
             await pilot.pause()
-            assert prompt._selected_index == 2
+            assert selector._selected_index == 2
 
             # Navigate up
             await pilot.press("up")
             await pilot.pause()
-            assert prompt._selected_index == 1
+            assert selector._selected_index == 1
 
     @pytest.mark.asyncio
-    async def test_inline_prompt_enter_selects(self, tmp_path: Path):
-        """Pressing Enter on InlinePrompt posts Selected message."""
+    async def test_inline_selector_enter_selects(self, tmp_path: Path):
+        """Pressing Enter on InlineSelector posts OptionSelected message."""
         from textual.app import App, ComposeResult
 
-        from lance_code_rag.tui.widgets import InlinePrompt
+        from lance_code_rag.tui.widgets import InlineSelector
 
         selected_value = None
 
         class TestApp(App):
             def compose(self) -> ComposeResult:
-                yield InlinePrompt(
+                yield InlineSelector(
                     "Select provider:",
                     [("local", "Local"), ("openai", "OpenAI")],
                 )
 
-            def on_inline_prompt_selected(
-                self, event: InlinePrompt.Selected
+            def on_inline_selector_option_selected(
+                self, event: InlineSelector.OptionSelected
             ) -> None:
                 nonlocal selected_value
                 selected_value = event.value
@@ -411,23 +406,23 @@ class TestInlinePromptWidget:
             assert selected_value == "local"
 
     @pytest.mark.asyncio
-    async def test_inline_prompt_escape_cancels(self, tmp_path: Path):
-        """Pressing Escape on InlinePrompt posts Cancelled message."""
+    async def test_inline_selector_escape_cancels(self, tmp_path: Path):
+        """Pressing Escape on InlineSelector posts SelectionCancelled message."""
         from textual.app import App, ComposeResult
 
-        from lance_code_rag.tui.widgets import InlinePrompt
+        from lance_code_rag.tui.widgets import InlineSelector
 
         cancelled = False
 
         class TestApp(App):
             def compose(self) -> ComposeResult:
-                yield InlinePrompt(
+                yield InlineSelector(
                     "Select provider:",
                     [("local", "Local"), ("openai", "OpenAI")],
                 )
 
-            def on_inline_prompt_cancelled(
-                self, event: InlinePrompt.Cancelled
+            def on_inline_selector_selection_cancelled(
+                self, event: InlineSelector.SelectionCancelled
             ) -> None:
                 nonlocal cancelled
                 cancelled = True
@@ -440,15 +435,15 @@ class TestInlinePromptWidget:
             assert cancelled is True
 
     @pytest.mark.asyncio
-    async def test_inline_prompt_default_index(self, tmp_path: Path):
-        """InlinePrompt respects default_index parameter."""
+    async def test_inline_selector_default_index(self, tmp_path: Path):
+        """InlineSelector respects default_index parameter."""
         from textual.app import App, ComposeResult
 
-        from lance_code_rag.tui.widgets import InlinePrompt
+        from lance_code_rag.tui.widgets import InlineSelector
 
         class TestApp(App):
             def compose(self) -> ComposeResult:
-                yield InlinePrompt(
+                yield InlineSelector(
                     "Select model:",
                     [("small", "Small"), ("base", "Base"), ("large", "Large")],
                     default_index=1,  # Should highlight "Base"
@@ -456,8 +451,8 @@ class TestInlinePromptWidget:
 
         app = TestApp()
         async with app.run_test() as pilot:
-            prompt = app.query_one(InlinePrompt)
-            assert prompt._selected_index == 1
+            selector = app.query_one(InlineSelector)
+            assert selector._selected_index == 1
 
 
 class TestRemoveCommand:

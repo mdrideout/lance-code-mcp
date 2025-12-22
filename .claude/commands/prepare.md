@@ -20,13 +20,13 @@ Use context7 to perform RAG on libraries and documentation to ensure you are usi
 
 **Important docs:**
 
-- Mistral Vibe CLI - Excellent Textual AI Chat Example
+- Mistral Vibe CLI - Excellent Textual AI Chat Example to reference when building
   - https://context7.com/mistralai/mistral-vibe
   - https://github.com/mistralai/mistral-vibe
-- Elia - Keyboard centric Textual TUI
+- Elia - Keyboard centric Textual TUI - another excellent Textual TUI reference for examples when building
   - https://context7.com/darrenburns/elia
   - https://github.com/darrenburns/elia
-- Textual TUI Documentation
+- Textual TUI Documentation - important to use context7 to get the correct syntax and examples when using Textual.
   - https://context7.com/websites/textual_textualize_io
   - https://textual.textualize.io/ 
   - https://github.com/textualize/textual/

@@ -1,6 +1,7 @@
 """TUI widgets for Lance Code RAG."""
 
 from .chat_area import ChatArea
+from .inline_selector import InlineSelector
 from .messages import (
     AssistantMessage,
     CodePreview,
@@ -18,6 +19,7 @@ from .welcome_box import WelcomeBox
 __all__ = [
     # Main layout widgets
     "ChatArea",
+    "InlineSelector",
     "SearchInput",
     "StatusBar",
     "WelcomeBox",

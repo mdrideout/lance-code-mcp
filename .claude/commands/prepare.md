@@ -14,12 +14,19 @@ Review the following files to understand the project, progress, and what's next.
 - All design docs inside @adr/
 - File and folder structure
 
-## Important Documentation:
+## Important Library Documentation:
 
-Use context7 to perform RAG on libraries and documentation to ensure you are using the latest and correct syntax, and to get examples.
+Use context7 to perform RAG on libraries and documentation to ensure you are using the latest and correct syntax, and to get examples. Below are links to context7 docs, github repos, and website docs.
 
-**Important docs:**
-
+- LanceDB - the vector databases used by Lance Code RAG (python library)
+  - https://context7.com/lancedb/lancedb
+  - https://context7.com/websites/lancedb
+  - https://github.com/lancedb/lancedb
+  - https://docs.lancedb.com/
+- FastMCP - powers this app's MCP server - critical docs for building this MCP server functionality
+  - https://context7.com/jlowin/fastmcp
+  - https://context7.com/llmstxt/gofastmcp_llms_txt
+  - https://context7.com/websites/gofastmcp
 - Mistral Vibe CLI - Excellent Textual AI Chat Example to reference when building
   - https://context7.com/mistralai/mistral-vibe
   - https://github.com/mistralai/mistral-vibe

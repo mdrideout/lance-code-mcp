@@ -31,6 +31,12 @@ Use context7 to perform RAG on libraries and documentation to ensure you are usi
   - https://textual.textualize.io/ 
   - https://github.com/textualize/textual/
 
+## Code Style
+
+- Use Textual UI conventions
+- Vertical slice feature organization
+- Use Grug development principles, such as single responsibility principle, principle of least astonishment, YAGNI, and KISS. Naked functions over unnecessary classes and abstractions. 
+
 ## Notes:
 
 - Use astral uv conventions

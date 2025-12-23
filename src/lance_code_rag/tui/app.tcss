@@ -19,7 +19,12 @@ Screen {
     padding: 0 2;
 }
 
-/* Search input at bottom */
+/* Input area container at bottom */
+#input-area {
+    height: auto;
+}
+
+/* Search input */
 #input {
     height: auto;
 }

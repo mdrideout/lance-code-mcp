@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from textual.containers import VerticalScroll
+from textual.css.query import NoMatches
 
 from ...config import LCRConfig
 from ...manifest import ManifestStats
@@ -41,10 +42,8 @@ class ChatArea(VerticalScroll):
     ) -> None:
         super().__init__(**kwargs)
         self._project_path = project_path or Path.cwd()
-        self._welcome_box: WelcomeBox | None = None
-        self._indexing_widget: IndexingProgress | None = None
 
-    def show_welcome(
+    async def show_welcome(
         self,
         config: LCRConfig | None = None,
         stats: ManifestStats | None = None,
@@ -57,18 +56,26 @@ class ChatArea(VerticalScroll):
             stats: Manifest statistics
             is_initialized: Whether the project is initialized
         """
+        # Remove existing welcome box if present (avoids duplicate ID error)
+        try:
+            existing = self.query_one("#welcome", WelcomeBox)
+            await existing.remove()
+        except NoMatches:
+            pass
+
         provider = config.embedding_provider if config else None
         model = config.embedding_model if config else None
         file_count = stats.total_files if stats else None
 
-        self._welcome_box = WelcomeBox(
+        welcome = WelcomeBox(
             provider=provider,
             model=model,
             file_count=file_count,
             project_path=self._project_path,
             is_initialized=is_initialized,
+            id="welcome",
         )
-        self.mount(self._welcome_box)
+        await self.mount(welcome)
 
     def update_welcome(
         self,
@@ -77,13 +84,16 @@ class ChatArea(VerticalScroll):
         is_initialized: bool | None = None,
     ) -> None:
         """Update the welcome box info without recreating it."""
-        if self._welcome_box:
-            self._welcome_box.update_info(
+        try:
+            welcome = self.query_one("#welcome", WelcomeBox)
+            welcome.update_info(
                 provider=config.embedding_provider if config else None,
                 model=config.embedding_model if config else None,
                 file_count=stats.total_files if stats else None,
                 is_initialized=is_initialized,
             )
+        except NoMatches:
+            pass  # Welcome box not shown
 
     def show_user_query(self, query: str) -> None:
         """Display a user query.
@@ -135,8 +145,8 @@ class ChatArea(VerticalScroll):
         Args:
             message: Initial message to display
         """
-        self._indexing_widget = IndexingProgress(message)
-        self.mount(self._indexing_widget)
+        indexing = IndexingProgress(message, id="indexing")
+        self.mount(indexing)
         self.scroll_end()
 
     def update_indexing(self, progress: float, message: str | None = None) -> None:
@@ -146,8 +156,11 @@ class ChatArea(VerticalScroll):
             progress: Progress value (0.0 to 1.0)
             message: Optional new message
         """
-        if self._indexing_widget:
-            self._indexing_widget.update_progress(progress, message)
+        try:
+            indexing = self.query_one("#indexing", IndexingProgress)
+            indexing.update_progress(progress, message)
+        except NoMatches:
+            pass  # Indexing widget not shown
 
     def finish_indexing(self, success: bool = True, message: str = "Indexing complete") -> None:
         """Complete indexing and show result.
@@ -156,9 +169,11 @@ class ChatArea(VerticalScroll):
             success: Whether indexing succeeded
             message: Completion message
         """
-        if self._indexing_widget:
-            self._indexing_widget.remove()
-            self._indexing_widget = None
+        try:
+            indexing = self.query_one("#indexing", IndexingProgress)
+            indexing.remove()
+        except NoMatches:
+            pass  # Already removed
 
         self.mount(StatusMessage(message, success=success))
         self.scroll_end()
@@ -166,5 +181,3 @@ class ChatArea(VerticalScroll):
     def clear(self) -> None:
         """Clear all content and re-show welcome box."""
         self.remove_children()
-        self._indexing_widget = None
-        self._welcome_box = None

@@ -4,14 +4,20 @@ import asyncio
 import json
 import shutil
 import time
-from enum import StrEnum, auto
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Literal, cast
 from pathlib import Path
 
 from rich.table import Table
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Vertical
+from textual.css.query import NoMatches
 from textual.reactive import reactive
+from textual.timer import Timer
+from textual.worker import Worker, WorkerState
 
 from .. import LCR_DIR
 from ..config import LCRConfig, get_lcr_dir, load_config, save_config
@@ -21,11 +27,33 @@ from ..search import SearchEngine, SearchError
 from .widgets import ChatArea, InlineSelector, SearchInput, StatusBar
 
 
-class BottomApp(StrEnum):
-    """Which widget is currently in the bottom input area."""
+class FlowType(StrEnum):
+    """Active flow types for multi-step operations."""
 
-    Input = auto()
-    Selector = auto()
+    INIT = "init"
+    REMOVE = "remove"
+
+
+@dataclass
+class FlowState:
+    """Typed state for multi-step flows like /init."""
+
+    flow: FlowType | None = None
+    step: str | None = None
+    provider: str | None = None
+    model: str | None = None
+
+    def reset(self) -> None:
+        """Reset to empty state."""
+        self.flow = None
+        self.step = None
+        self.provider = None
+        self.model = None
+
+    @property
+    def is_active(self) -> bool:
+        """Check if a flow is active."""
+        return self.flow is not None
 
 
 # Embedding provider options
@@ -67,14 +95,36 @@ class LCRApp(App):
         self._manifest: Manifest | None = None
         # Track Ctrl+C timing for two-stage quit
         self._ctrl_c_time: float = 0.0
-        self._ctrl_c_timer: object | None = None  # Timer to reset status message
-
-        # Bottom app swapping state (Mistral Vibe pattern)
-        self._current_bottom_app = BottomApp.Input
+        self._ctrl_c_timer: Timer | None = None  # Timer to reset status message
 
         # Multi-step flow state (for /init, /remove)
-        # Keys: "flow" (e.g., "init", "remove"), plus flow-specific state
-        self._flow_state: dict = {}
+        self._flow_state = FlowState()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Reactive Watchers
+    # ─────────────────────────────────────────────────────────────────────
+
+    def watch_is_initialized(self, is_initialized: bool) -> None:
+        """React to initialization state changes."""
+        try:
+            status_bar = self.query_one("#status", StatusBar)
+            if is_initialized:
+                status_bar.set_ready()
+            else:
+                status_bar.set_not_initialized()
+        except NoMatches:
+            pass  # Not yet mounted
+
+    def watch_is_indexing(self, is_indexing: bool) -> None:
+        """React to indexing state changes."""
+        try:
+            status_bar = self.query_one("#status", StatusBar)
+            if is_indexing:
+                status_bar.set_indexing()
+            else:
+                status_bar.set_ready()
+        except NoMatches:
+            pass  # Not yet mounted
 
     @property
     def search_engine(self) -> SearchEngine:
@@ -87,7 +137,7 @@ class LCRApp(App):
         """Create app layout with widgets directly at Screen level."""
         yield ChatArea(project_path=self.project_root, id="chat")
         yield StatusBar(project_path=self.project_root, id="status")
-        yield SearchInput(id="input")
+        yield Vertical(SearchInput(id="input"), id="input-area")
 
     async def on_mount(self) -> None:
         """Handle app mount - check initialization and show welcome."""
@@ -102,11 +152,11 @@ class LCRApp(App):
 
         if self.is_initialized:
             self._load_status()
-            self._show_welcome()
+            await self._show_welcome()
         else:
             # Show not initialized state - prompt user to run /init
             chat = self.query_one("#chat", ChatArea)
-            chat.show_welcome(is_initialized=False)
+            await chat.show_welcome(is_initialized=False)
 
     def _check_initialized(self) -> None:
         """Check if lcr is initialized in this project."""
@@ -122,26 +172,26 @@ class LCRApp(App):
             pass
 
     def _update_status_bar(self) -> None:
-        """Update the status bar with current state."""
-        status_bar = self.query_one("#status", StatusBar)
-        file_count = self._manifest.stats.total_files if self._manifest else None
+        """Update status bar file count from manifest.
 
-        status_bar.update(
-            is_initialized=self.is_initialized,
-            file_count=file_count,
-        )
+        Note: Status state (ready/indexing/not initialized) is now handled
+        automatically by reactive watchers watch_is_initialized() and
+        watch_is_indexing().
+        """
+        try:
+            status_bar = self.query_one("#status", StatusBar)
+            file_count = self._manifest.stats.total_files if self._manifest else None
+            status_bar.update(
+                is_initialized=self.is_initialized,
+                file_count=file_count,
+            )
+        except NoMatches:
+            pass  # Not yet mounted
 
-        if not self.is_initialized:
-            status_bar.set_not_initialized()
-        elif self.is_indexing:
-            status_bar.set_indexing()
-        else:
-            status_bar.set_ready()
-
-    def _show_welcome(self) -> None:
+    async def _show_welcome(self) -> None:
         """Show welcome box with current status."""
         chat = self.query_one("#chat", ChatArea)
-        chat.show_welcome(
+        await chat.show_welcome(
             config=self._config,
             stats=self._manifest.stats if self._manifest else None,
             is_initialized=self.is_initialized,
@@ -163,43 +213,18 @@ class LCRApp(App):
         When the user makes a selection or cancels, InlineSelector posts
         a message which we handle to restore the input and continue the flow.
         """
-        if self._current_bottom_app == BottomApp.Selector:
-            # Already showing a selector - remove it first
-            try:
-                old_selector = self.query_one("#selector", InlineSelector)
-                await old_selector.remove()
-            except Exception:
-                pass
-
-        # Remove search input
-        try:
-            search_input = self.query_one("#input", SearchInput)
-            await search_input.remove()
-        except Exception:
-            pass
-
-        # Mount selector
+        input_area = self.query_one("#input-area", Vertical)
+        input_area.remove_children()
         selector = InlineSelector(title, options, default_index, id="selector")
-        await self.mount(selector)
-        self._current_bottom_app = BottomApp.Selector
+        await input_area.mount(selector)
         self.call_after_refresh(selector.focus)
 
     async def _switch_to_input(self) -> None:
         """Switch from selector back to search input."""
-        if self._current_bottom_app == BottomApp.Input:
-            return
-
-        # Remove selector
-        try:
-            selector = self.query_one("#selector", InlineSelector)
-            await selector.remove()
-        except Exception:
-            pass
-
-        # Mount search input
+        input_area = self.query_one("#input-area", Vertical)
+        input_area.remove_children()
         search_input = SearchInput(id="input")
-        await self.mount(search_input)
-        self._current_bottom_app = BottomApp.Input
+        await input_area.mount(search_input)
         self.call_after_refresh(search_input.focus)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -209,16 +234,16 @@ class LCRApp(App):
     @on(InlineSelector.OptionSelected)
     async def _on_option_selected(self, event: InlineSelector.OptionSelected) -> None:
         """Handle option selection from inline selector."""
-        flow = self._flow_state.get("flow")
+        flow = self._flow_state.flow
 
-        if flow == "init":
+        if flow == FlowType.INIT:
             await self._handle_init_selection(event.value)
-        elif flow == "remove":
+        elif flow == FlowType.REMOVE:
             await self._handle_remove_selection(event.value)
         else:
             # Unknown flow - just restore input
             await self._switch_to_input()
-            self._flow_state = {}
+            self._flow_state.reset()
 
     @on(InlineSelector.SelectionCancelled)
     async def _on_selection_cancelled(
@@ -226,13 +251,13 @@ class LCRApp(App):
     ) -> None:
         """Handle selection cancellation."""
         chat = self.query_one("#chat", ChatArea)
-        flow = self._flow_state.get("flow")
+        flow = self._flow_state.flow
 
         if flow:
-            chat.show_status(f"{flow.title()} cancelled", success=False)
+            chat.show_status(f"{flow.value.title()} cancelled", success=False)
 
         await self._switch_to_input()
-        self._flow_state = {}
+        self._flow_state.reset()
 
     def _update_gitignore(self) -> None:
         """Add .lance-code-rag to .gitignore if not present."""
@@ -271,11 +296,25 @@ class LCRApp(App):
         }
 
         if cmd.command in async_handlers:
-            self.run_worker(async_handlers[cmd.command](cmd.args))
+            self.run_worker(
+                async_handlers[cmd.command](cmd.args),
+                group="commands",
+                exclusive=True,
+            )
         else:
             chat = self.query_one("#chat", ChatArea)
             chat.show_status(f"Unknown command: {cmd.command}", success=False)
             chat.show_assistant_message("Type /help for available commands.", style="dim")
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Handle worker state changes for error reporting."""
+        if event.state == WorkerState.ERROR:
+            self.log.error(f"Worker failed: {event.worker.error}")
+            try:
+                chat = self.query_one("#chat", ChatArea)
+                chat.show_status(f"Command failed: {event.worker.error}", success=False)
+            except NoMatches:
+                pass  # Chat not mounted
 
     # ─────────────────────────────────────────────────────────────────────
     # /init Flow (multi-step inline selection)
@@ -293,13 +332,14 @@ class LCRApp(App):
         chat.show_assistant_message("Initializing lance-code-rag...")
 
         # Start init flow - step 1: select provider
-        self._flow_state = {"flow": "init", "step": "provider"}
+        self._flow_state.flow = FlowType.INIT
+        self._flow_state.step = "provider"
         await self._switch_to_selector("Select embedding provider:", PROVIDERS)
 
     async def _handle_init_selection(self, value: str) -> None:
         """Handle selections during the /init flow."""
         chat = self.query_one("#chat", ChatArea)
-        step = self._flow_state.get("step")
+        step = self._flow_state.step
 
         if step == "provider":
             # Provider selected
@@ -307,14 +347,14 @@ class LCRApp(App):
                 chat.show_status(f"{value.title()} coming soon!", success=False)
                 chat.show_assistant_message("Only local embeddings are available currently.")
                 await self._switch_to_input()
-                self._flow_state = {}
+                self._flow_state.reset()
                 return
 
             chat.show_status(f"Provider: {value}")
-            self._flow_state["provider"] = value
+            self._flow_state.provider = value
 
             # Step 2: select model
-            self._flow_state["step"] = "model"
+            self._flow_state.step = "model"
             model_options = [(m[0], m[1]) for m in LOCAL_MODELS]
             await self._switch_to_selector(
                 "Select embedding model:",
@@ -329,7 +369,7 @@ class LCRApp(App):
             if not model_info:
                 chat.show_status("Invalid model selection", success=False)
                 await self._switch_to_input()
-                self._flow_state = {}
+                self._flow_state.reset()
                 return
 
             _, _, model_name, dimensions = model_info
@@ -339,15 +379,20 @@ class LCRApp(App):
             await self._switch_to_input()
 
             # Complete initialization
+            # Cast is safe: provider was validated in the flow (only "local" currently supported)
+            provider = cast(
+                Literal["local", "gemini", "openai"],
+                self._flow_state.provider or "local",
+            )
             await self._complete_init(
-                provider=self._flow_state.get("provider", "local"),
+                provider=provider,
                 model_name=model_name,
                 dimensions=dimensions,
             )
-            self._flow_state = {}
+            self._flow_state.reset()
 
     async def _complete_init(
-        self, provider: str, model_name: str, dimensions: int
+        self, provider: Literal["local", "gemini", "openai"], model_name: str, dimensions: int
     ) -> None:
         """Complete the initialization after selections are made."""
         chat = self.query_one("#chat", ChatArea)
@@ -608,7 +653,7 @@ class LCRApp(App):
         chat.show_assistant_message("Remove lance-code-rag from this project?")
 
         # Start remove flow
-        self._flow_state = {"flow": "remove"}
+        self._flow_state.flow = FlowType.REMOVE
         await self._switch_to_selector(
             "This will remove:",
             [
@@ -623,7 +668,7 @@ class LCRApp(App):
 
         # Restore input first
         await self._switch_to_input()
-        self._flow_state = {}
+        self._flow_state.reset()
 
         if value != "yes":
             chat.show_status("Removal cancelled", success=False)
@@ -658,7 +703,7 @@ class LCRApp(App):
             self._update_status_bar()
 
             # Show not-initialized welcome
-            chat.show_welcome(is_initialized=False)
+            await chat.show_welcome(is_initialized=False)
 
         except Exception as e:
             chat.show_status(f"Removal failed: {e}", success=False)
@@ -812,7 +857,7 @@ class LCRApp(App):
         """Handle /clear command."""
         chat = self.query_one("#chat", ChatArea)
         chat.clear()
-        self._show_welcome()
+        await self._show_welcome()
 
     async def _handle_quit(self, args: str) -> None:
         """Handle /quit command."""
@@ -857,11 +902,11 @@ class LCRApp(App):
         """Quit the application (used by /quit command)."""
         self.exit()
 
-    def action_clear(self) -> None:
+    async def action_clear(self) -> None:
         """Clear the output."""
         chat = self.query_one("#chat", ChatArea)
         chat.clear()
-        self._show_welcome()
+        await self._show_welcome()
 
     def action_help(self) -> None:
         """Show help."""

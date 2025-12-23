@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from rich.console import RenderableType
+from rich.table import Table
 from rich.text import Text
 from textual.widgets import Static
 
@@ -109,43 +110,28 @@ class StatusBar(Static):
         self.refresh()
 
     def render(self) -> RenderableType:
-        text = Text()
-
-        # Left: Status indicator
-        text.append(": ", style="dim")
-
-        # Status with optional progress
+        # Left side: Status indicator
+        left = Text()
+        left.append(": ", style="dim")
         if self._indexing_progress is not None:
             pct = f" {self._indexing_progress * 100:.0f}%"
-            text.append(self._status + pct, style=self._status_style)
+            left.append(self._status + pct, style=self._status_style)
         else:
-            text.append(self._status, style=self._status_style)
+            left.append(self._status, style=self._status_style)
 
-        # Calculate spacing for right-aligned content
-        # We'll use a simple approach - pad with spaces
-        path_str = self._get_abbreviated_path()
-        file_info = self._get_file_info()
+        # Right side: Path and file count
+        right = Text()
+        right.append(self._get_abbreviated_path(), style="blue dim")
+        right.append("  ")
+        right.append(self._get_file_info(), style="dim")
 
-        # Build right side
-        right_side = f"{path_str}  {file_info}"
+        # Use Table.grid() for automatic width handling
+        grid = Table.grid(expand=True)
+        grid.add_column(ratio=1)  # Left expands to fill space
+        grid.add_column(justify="right")  # Right fixed, right-aligned
+        grid.add_row(left, right)
 
-        # Get available width (approximate - we'll pad generously)
-        left_len = len(": ") + len(self._status)
-        if self._indexing_progress is not None:
-            left_len += 5  # " 100%"
-
-        # Pad to push right side to the end
-        # Use a reasonable terminal width assumption
-        total_width = 80
-        padding = max(1, total_width - left_len - len(right_side))
-        text.append(" " * padding)
-
-        # Right: Path and file count
-        text.append(path_str, style="blue dim")
-        text.append("  ")
-        text.append(file_info, style="dim")
-
-        return text
+        return grid
 
     def _get_abbreviated_path(self) -> str:
         """Get the full project path."""

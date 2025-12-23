@@ -6,8 +6,8 @@ import shutil
 import time
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal, cast
 from pathlib import Path
+from typing import Literal, cast
 
 from rich.table import Table
 from textual import on
@@ -214,7 +214,7 @@ class LCRApp(App):
         a message which we handle to restore the input and continue the flow.
         """
         input_area = self.query_one("#input-area", Vertical)
-        input_area.remove_children()
+        await input_area.remove_children()
         selector = InlineSelector(title, options, default_index, id="selector")
         await input_area.mount(selector)
         self.call_after_refresh(selector.focus)
@@ -222,7 +222,7 @@ class LCRApp(App):
     async def _switch_to_input(self) -> None:
         """Switch from selector back to search input."""
         input_area = self.query_one("#input-area", Vertical)
-        input_area.remove_children()
+        await input_area.remove_children()
         search_input = SearchInput(id="input")
         await input_area.mount(search_input)
         self.call_after_refresh(search_input.focus)
@@ -324,12 +324,26 @@ class LCRApp(App):
         """Start the /init flow - shows first inline selector."""
         chat = self.query_one("#chat", ChatArea)
 
+        # Warn if trying to index home directory or root-level paths
+        home = Path.home()
+        if self.project_root == home or self.project_root in home.parents:
+            chat.show_status("Cannot initialize in home directory", success=False)
+            chat.show_assistant_message(
+                f"Current directory: {self.project_root}",
+                style="dim",
+            )
+            chat.show_assistant_message(
+                "Navigate to a project directory and run 'lcr' from there.",
+                style="yellow",
+            )
+            return
+
         if self.is_initialized and "--force" not in args:
             chat.show_status("Already initialized", success=False)
             chat.show_assistant_message("Use /init --force to reinitialize.", style="dim")
             return
 
-        chat.show_assistant_message("Initializing lance-code-rag...")
+        chat.show_assistant_message(f"Initializing lance-code-rag in {self.project_root}...")
 
         # Start init flow - step 1: select provider
         self._flow_state.flow = FlowType.INIT
@@ -436,9 +450,13 @@ class LCRApp(App):
                 is_initialized=True,
             )
 
-            # Auto-index
+            # Auto-index - run in a worker to avoid blocking UI
             chat.show_assistant_message("Starting initial indexing...")
-            await self._run_indexing(force=False)
+            self.run_worker(
+                self._run_indexing(force=False),
+                group="indexing",
+                exclusive=True,
+            )
 
         except Exception as e:
             chat.show_status(f"Initialization failed: {e}", success=False)
@@ -533,8 +551,13 @@ class LCRApp(App):
             chat.show_assistant_message("Run /init first.", style="dim")
             return
 
+        # Run in a dedicated worker to avoid blocking UI
         force = "--force" in args
-        await self._run_indexing(force=force)
+        self.run_worker(
+            self._run_indexing(force=force),
+            group="indexing",
+            exclusive=True,
+        )
 
     async def _run_indexing(self, force: bool = False) -> None:
         """Run the indexing process."""
@@ -545,7 +568,7 @@ class LCRApp(App):
         status_bar.set_indexing(0.0)
 
         mode = "full re-index" if force else "incremental index"
-        chat.start_indexing(f"Starting {mode}...")
+        chat.start_indexing(f"Starting {mode} of {self.project_root}...")
 
         try:
             stats = await asyncio.to_thread(
@@ -865,8 +888,6 @@ class LCRApp(App):
 
     def action_interrupt(self) -> None:
         """Handle Ctrl+C: clear input first, quit on second press within 2 seconds."""
-        input_widget = self.query_one("#input", SearchInput)
-        status_bar = self.query_one("#status", StatusBar)
         current_time = time.monotonic()
 
         # Cancel any existing timer
@@ -874,8 +895,22 @@ class LCRApp(App):
             self._ctrl_c_timer.stop()
             self._ctrl_c_timer = None
 
+        # Try to get input widget - might not exist during flow transitions
+        try:
+            input_widget = self.query_one("#input", SearchInput)
+            has_text = input_widget.text.strip()
+        except NoMatches:
+            has_text = False
+
+        try:
+            status_bar = self.query_one("#status", StatusBar)
+        except NoMatches:
+            # Status bar not available - just quit on Ctrl+C
+            self.exit()
+            return
+
         # If there's text in the input, clear it
-        if input_widget.text.strip():
+        if has_text:
             input_widget.clear()
             self._ctrl_c_time = current_time
             status_bar.set_status("Input cleared. Press Ctrl+C again to quit.")

@@ -4,6 +4,7 @@
 # Claude Code
 .claude/*
 !.claude/commands/
+.mcp.json
 
 # Python
 __pycache__/

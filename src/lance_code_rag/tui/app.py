@@ -10,18 +10,18 @@ from pathlib import Path
 from typing import Literal, cast
 
 from rich.table import Table
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.reactive import reactive
 from textual.timer import Timer
-from textual.worker import Worker, WorkerState
+from textual.worker import Worker, WorkerState, get_current_worker
 
 from .. import LCR_DIR
 from ..config import LCRConfig, get_lcr_dir, load_config, save_config
-from ..indexer import run_index
+from ..indexer import IndexStats, run_index
 from ..manifest import Manifest, create_empty_manifest, load_manifest, save_manifest
 from ..search import SearchEngine, SearchError
 from .widgets import ChatArea, InlineSelector, SearchInput, StatusBar
@@ -308,6 +308,10 @@ class LCRApp(App):
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Handle worker state changes for error reporting."""
+        # Skip indexing group - handled via call_from_thread in _run_indexing
+        if event.worker.group == "indexing":
+            return
+
         if event.state == WorkerState.ERROR:
             self.log.error(f"Worker failed: {event.worker.error}")
             try:
@@ -450,13 +454,9 @@ class LCRApp(App):
                 is_initialized=True,
             )
 
-            # Auto-index - run in a worker to avoid blocking UI
+            # Auto-index - @work decorator handles worker creation
             chat.show_assistant_message("Starting initial indexing...")
-            self.run_worker(
-                self._run_indexing(force=False),
-                group="indexing",
-                exclusive=True,
-            )
+            self._run_indexing(force=False)
 
         except Exception as e:
             chat.show_status(f"Initialization failed: {e}", success=False)
@@ -551,56 +551,95 @@ class LCRApp(App):
             chat.show_assistant_message("Run /init first.", style="dim")
             return
 
-        # Run in a dedicated worker to avoid blocking UI
+        # Run indexing in a thread worker (Textual pattern for blocking I/O)
         force = "--force" in args
-        self.run_worker(
-            self._run_indexing(force=force),
-            group="indexing",
-            exclusive=True,
-        )
+        self._run_indexing(force=force)
 
-    async def _run_indexing(self, force: bool = False) -> None:
-        """Run the indexing process."""
-        chat = self.query_one("#chat", ChatArea)
-        status_bar = self.query_one("#status", StatusBar)
+    @work(exclusive=True, thread=True, group="indexing")
+    def _run_indexing(self, force: bool = False) -> None:
+        """Run the indexing process in a thread worker.
 
-        self.is_indexing = True
-        status_bar.set_indexing(0.0)
+        Uses Textual's @work(thread=True) pattern for blocking I/O.
+        UI updates are done via call_from_thread().
+        """
+        from rich.console import Console
 
+        worker = get_current_worker()
+
+        # Update UI to show indexing started (from thread)
         mode = "full re-index" if force else "incremental index"
-        chat.start_indexing(f"Starting {mode} of {self.project_root}...")
+        self.call_from_thread(self._on_indexing_started, mode)
 
         try:
-            stats = await asyncio.to_thread(
-                run_index,
+            # Create a null console to prevent Rich from interfering with Textual
+            null_console = Console(force_terminal=False, no_color=True, quiet=True)
+
+            # Run the blocking indexing operation
+            stats = run_index(
                 self.project_root,
                 force=force,
                 verbose=False,
-                console=None,
+                console=null_console,
             )
 
-            # Show stats
-            chat.finish_indexing(
-                success=True,
-                message=f"Indexed {stats.files_scanned} files, {stats.chunks_added} chunks",
-            )
-
-            # Reload manifest and update displays
-            self._manifest = load_manifest(self.project_root)
-            self._update_status_bar()
-
-            # Update welcome box with new file count
-            chat.update_welcome(
-                config=self._config,
-                stats=self._manifest.stats if self._manifest else None,
-                is_initialized=True,
-            )
+            # Check if cancelled before updating UI
+            if not worker.is_cancelled:
+                self.call_from_thread(self._on_indexing_complete, stats)
 
         except Exception as e:
-            chat.finish_indexing(success=False, message=f"Indexing failed: {e}")
-        finally:
-            self.is_indexing = False
-            status_bar.set_ready()
+            if not worker.is_cancelled:
+                self.call_from_thread(self._on_indexing_error, str(e))
+
+    def _on_indexing_started(self, mode: str) -> None:
+        """Called from thread when indexing starts."""
+        try:
+            chat = self.query_one("#chat", ChatArea)
+            status_bar = self.query_one("#status", StatusBar)
+        except NoMatches:
+            return
+
+        self.is_indexing = True
+        status_bar.set_indexing(0.0)
+        chat.start_indexing(f"Starting {mode} of {self.project_root}...")
+
+    def _on_indexing_complete(self, stats: IndexStats) -> None:
+        """Called from thread when indexing completes successfully."""
+        try:
+            chat = self.query_one("#chat", ChatArea)
+            status_bar = self.query_one("#status", StatusBar)
+        except NoMatches:
+            return
+
+        chat.finish_indexing(
+            success=True,
+            message=f"Indexed {stats.files_scanned} files, {stats.chunks_added} chunks",
+        )
+
+        # Reload manifest and update displays
+        self._manifest = load_manifest(self.project_root)
+        self._update_status_bar()
+
+        # Update welcome box with new file count
+        chat.update_welcome(
+            config=self._config,
+            stats=self._manifest.stats if self._manifest else None,
+            is_initialized=True,
+        )
+
+        self.is_indexing = False
+        status_bar.set_ready()
+
+    def _on_indexing_error(self, error_msg: str) -> None:
+        """Called from thread when indexing fails."""
+        try:
+            chat = self.query_one("#chat", ChatArea)
+            status_bar = self.query_one("#status", StatusBar)
+        except NoMatches:
+            return
+
+        chat.finish_indexing(success=False, message=f"Indexing failed: {error_msg}")
+        self.is_indexing = False
+        status_bar.set_ready()
 
     async def _handle_status(self, args: str) -> None:
         """Handle /status command."""
@@ -931,7 +970,17 @@ class LCRApp(App):
         """Reset status bar after Ctrl+C timeout."""
         self._ctrl_c_timer = None
         self._ctrl_c_time = 0.0  # Reset time so next Ctrl+C starts fresh
-        self._update_status_bar()  # Restore normal status
+        # Restore normal status bar state
+        try:
+            status_bar = self.query_one("#status", StatusBar)
+            if self.is_indexing:
+                status_bar.set_indexing()
+            elif self.is_initialized:
+                status_bar.set_ready()
+            else:
+                status_bar.set_not_initialized()
+        except NoMatches:
+            pass
 
     def action_quit(self) -> None:
         """Quit the application (used by /quit command)."""

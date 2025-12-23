@@ -80,15 +80,133 @@ async def _handle_init_selection(self, value):
 - `run_test()` with Pilot is **headless simulation** - may not catch real terminal issues
 - Always test with actual terminal (`uv run lcr`) when debugging keyboard/focus problems
 
-### 2. Historical: The @work Decorator Issue
+### 2. Widget Swapping Must Await remove_children()
 
-> **Note**: This is now historical context. We've refactored to inline widgets which avoid this issue entirely.
+**Problem**: `DuplicateIds` error when swapping widgets.
 
-**Problem**: `await` inside `@on` event handlers blocks the Textual event loop.
+**Cause**: `remove_children()` is async - if not awaited, the old widget still exists when mounting the new one.
 
-**Old Solution**: Use `@work(exclusive=True)` decorator for handlers that await modal screens.
+```python
+# WRONG - causes DuplicateIds
+input_area.remove_children()  # Not awaited!
+await input_area.mount(new_widget)
 
-**Current Solution**: Use inline widgets with message-based communication. No `await` needed in handlers since widgets post messages when done.
+# CORRECT
+await input_area.remove_children()
+await input_area.mount(new_widget)
+```
+
+### 3. Textual Workers for Blocking I/O
+
+**Problem**: Long-running blocking operations freeze the UI.
+
+**Solution**: Use `@work(thread=True)` decorator for blocking functions.
+
+#### CRITICAL: Correct Worker Pattern
+
+```python
+from textual import work
+from textual.worker import get_current_worker
+
+# For BLOCKING (sync) functions - use thread=True
+@work(exclusive=True, thread=True, group="indexing")
+def do_blocking_work(self, param: str) -> None:
+    """Runs in a thread. Use call_from_thread() for UI updates."""
+    worker = get_current_worker()
+
+    # Do blocking work
+    result = some_blocking_operation()
+
+    # Update UI safely from thread
+    if not worker.is_cancelled:
+        self.call_from_thread(self._on_work_complete, result)
+
+# For ASYNC functions - no thread=True
+@work(exclusive=True)
+async def do_async_work(self) -> None:
+    """Runs as async task."""
+    result = await some_async_operation()
+    self.update_ui(result)  # Can update directly
+```
+
+#### WRONG Patterns (Common Mistakes)
+
+```python
+# WRONG: Don't wrap @work-decorated methods in run_worker()
+@work(thread=True)
+def my_worker(self):
+    pass
+
+# BAD - double-wrapping!
+self.run_worker(self.my_worker())
+
+# GOOD - just call directly, decorator handles it
+self.my_worker()
+```
+
+```python
+# WRONG: Don't use asyncio.to_thread inside @on handlers
+@on(SomeMessage)
+async def handler(self, event):
+    # This can freeze the UI!
+    await asyncio.to_thread(blocking_func)
+
+# GOOD: Use @work(thread=True) method instead
+@on(SomeMessage)
+async def handler(self, event):
+    self._do_blocking_work()  # @work decorated
+
+@work(thread=True)
+def _do_blocking_work(self):
+    blocking_func()
+```
+
+```python
+# WRONG: Import from textual.work
+from textual.work import work  # ModuleNotFoundError!
+
+# CORRECT: Import from textual
+from textual import work
+```
+
+#### UI Updates from Thread Workers
+
+```python
+@work(thread=True)
+def _run_indexing(self, force: bool) -> None:
+    worker = get_current_worker()
+
+    # Signal start
+    self.call_from_thread(self._on_indexing_started)
+
+    try:
+        result = run_blocking_index()
+        if not worker.is_cancelled:
+            self.call_from_thread(self._on_indexing_complete, result)
+    except Exception as e:
+        if not worker.is_cancelled:
+            self.call_from_thread(self._on_indexing_error, str(e))
+
+def _on_indexing_started(self) -> None:
+    """Called from thread - updates UI."""
+    self.query_one("#status").set_indexing()
+
+def _on_indexing_complete(self, result) -> None:
+    """Called from thread - updates UI."""
+    self.query_one("#chat").show_result(result)
+```
+
+### 4. Rich Console Conflicts with Textual
+
+**Problem**: Rich Console/Progress in background threads can interfere with Textual's terminal control.
+
+**Solution**: Create a null console for background operations:
+
+```python
+from rich.console import Console
+null_console = Console(force_terminal=False, no_color=True, quiet=True)
+result = run_index(console=null_console)
+```
 
 ---
 
@@ -103,12 +221,19 @@ async def _handle_init_selection(self, value):
 - Use declarative `BINDINGS` with `action_*` methods
 - Yield widgets directly at Screen level (no wrapper container)
 - Track multi-step flow state in a dict
+- Use `@work(thread=True)` for blocking I/O operations
+- Use `call_from_thread()` to update UI from thread workers
+- Always `await` `remove_children()` before mounting new widgets
+- Import `work` from `textual`, not `textual.work`
 
 ### DON'T:
 - Don't use ModalScreen for selection prompts (use inline widgets)
 - Don't toggle visibility (`display=False`) - remove and mount widgets instead
 - Don't nest focusable widgets without `can_focus_children=False`
 - Don't rely solely on `run_test()` - test in real terminal for input issues
+- Don't wrap `@work`-decorated methods in `run_worker()` - just call them directly
+- Don't use `asyncio.to_thread()` inside `@on` handlers - use `@work(thread=True)` instead
+- Don't use Rich Console/Progress in threads without `force_terminal=False`
 
 ---
 

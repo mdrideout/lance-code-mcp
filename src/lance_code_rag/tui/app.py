@@ -13,8 +13,10 @@ from rich.table import Table
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.css.query import NoMatches
+from textual.widget import Widget
+from textual.widgets import Static
 from textual.reactive import reactive
 from textual.timer import Timer
 from textual.worker import Worker, WorkerState, get_current_worker
@@ -24,7 +26,14 @@ from ..config import LCRConfig, get_lcr_dir, load_config, save_config
 from ..indexer import IndexStats, run_index
 from ..manifest import Manifest, create_empty_manifest, load_manifest, save_manifest
 from ..search import SearchEngine, SearchError
-from .widgets import ChatArea, InlineSelector, SearchInput, StatusBar
+from .widgets import InlineSelector, SearchInput, StatusBar, WelcomeBox
+from .widgets.messages import (
+    AssistantMessage,
+    HelpDisplay,
+    SearchResultsDisplay,
+    StatusMessage,
+    UserQuery,
+)
 
 
 class FlowType(StrEnum):
@@ -134,10 +143,113 @@ class LCRApp(App):
         return self._search_engine
 
     def compose(self) -> ComposeResult:
-        """Create app layout with widgets directly at Screen level."""
-        yield ChatArea(project_path=self.project_root, id="chat")
-        yield StatusBar(project_path=self.project_root, id="status")
-        yield Vertical(SearchInput(id="input"), id="input-area")
+        """Create app layout - Standard Vertical Flow (Anatomy Pattern)."""
+        # Chat area: VerticalScroll takes remaining space (1fr)
+        # CRITICAL: can_focus=False allows mouse wheel scrolling without focus stealing
+        chat = VerticalScroll(id="chat")
+        chat.can_focus = False
+        yield chat
+        
+        # Bottom container for status and input - sits at bottom naturally
+        with Vertical(id="bottom-container"):
+            yield StatusBar(project_path=self.project_root, id="status")
+            yield Vertical(SearchInput(id="input"), id="input-area")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Chat Message Helpers (replaces ChatArea methods)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _mount_message(self, widget: Widget) -> None:
+        """Mount a widget into the chat area and scroll to end."""
+        chat = self.query_one("#chat", VerticalScroll)
+        chat.mount(widget)
+        chat.scroll_end()
+
+    async def _show_welcome_box(
+        self,
+        config: LCRConfig | None = None,
+        stats=None,
+        is_initialized: bool = False,
+    ) -> None:
+        """Display the welcome box with project info."""
+        chat = self.query_one("#chat", VerticalScroll)
+        # Remove existing welcome box if present
+        try:
+            existing = chat.query_one("#welcome", WelcomeBox)
+            await existing.remove()
+        except NoMatches:
+            pass
+
+        provider = config.embedding_provider if config else None
+        model = config.embedding_model if config else None
+        file_count = stats.total_files if stats else None
+
+        welcome = WelcomeBox(
+            provider=provider,
+            model=model,
+            file_count=file_count,
+            project_path=self.project_root,
+            is_initialized=is_initialized,
+            id="welcome",
+        )
+        await chat.mount(welcome)
+
+    def _update_welcome_box(
+        self,
+        config: LCRConfig | None = None,
+        stats=None,
+        is_initialized: bool | None = None,
+    ) -> None:
+        """Update the welcome box info without recreating it."""
+        try:
+            chat = self.query_one("#chat", VerticalScroll)
+            welcome = chat.query_one("#welcome", WelcomeBox)
+            welcome.update_info(
+                provider=config.embedding_provider if config else None,
+                model=config.embedding_model if config else None,
+                file_count=stats.total_files if stats else None,
+                is_initialized=is_initialized,
+            )
+        except NoMatches:
+            pass
+
+    def _show_user_query(self, query: str) -> None:
+        """Display a user query."""
+        self._mount_message(UserQuery(query))
+
+    def _show_assistant_message(self, message: str, style: str = "dim") -> None:
+        """Display an assistant message with bullet prefix."""
+        self._mount_message(AssistantMessage(message, style))
+
+    def _show_status(
+        self, message: str, success: bool = True, details: str | None = None
+    ) -> None:
+        """Display a status message (success or error)."""
+        self._mount_message(StatusMessage(message, success, details))
+
+    def _show_search_results(self, results) -> None:
+        """Display search results."""
+        self._mount_message(SearchResultsDisplay(results))
+
+    def _show_help(self) -> None:
+        """Display help information."""
+        self._mount_message(HelpDisplay())
+
+    def _start_indexing_message(self, message: str = "Indexing started") -> None:
+        """Show indexing started message."""
+        self._mount_message(StatusMessage(message, success=True))
+
+    def _finish_indexing_message(
+        self, success: bool = True, message: str | None = None
+    ) -> None:
+        """Show error message on indexing failure (silent on success)."""
+        if not success and message:
+            self._mount_message(StatusMessage(message, success=False))
+
+    def _clear_chat(self) -> None:
+        """Clear all chat content."""
+        chat = self.query_one("#chat", VerticalScroll)
+        chat.remove_children()
 
     async def on_mount(self) -> None:
         """Handle app mount - check initialization and show welcome."""
@@ -155,8 +267,7 @@ class LCRApp(App):
             await self._show_welcome()
         else:
             # Show not initialized state - prompt user to run /init
-            chat = self.query_one("#chat", ChatArea)
-            await chat.show_welcome(is_initialized=False)
+            await self._show_welcome_box(is_initialized=False)
 
     def _check_initialized(self) -> None:
         """Check if lcr is initialized in this project."""
@@ -190,8 +301,7 @@ class LCRApp(App):
 
     async def _show_welcome(self) -> None:
         """Show welcome box with current status."""
-        chat = self.query_one("#chat", ChatArea)
-        await chat.show_welcome(
+        await self._show_welcome_box(
             config=self._config,
             stats=self._manifest.stats if self._manifest else None,
             is_initialized=self.is_initialized,
@@ -250,11 +360,10 @@ class LCRApp(App):
         self, event: InlineSelector.SelectionCancelled
     ) -> None:
         """Handle selection cancellation."""
-        chat = self.query_one("#chat", ChatArea)
         flow = self._flow_state.flow
 
         if flow:
-            chat.show_status(f"{flow.value.title()} cancelled", success=False)
+            self._show_status(f"{flow.value.title()} cancelled", success=False)
 
         await self._switch_to_input()
         self._flow_state.reset()
@@ -302,9 +411,8 @@ class LCRApp(App):
                 exclusive=True,
             )
         else:
-            chat = self.query_one("#chat", ChatArea)
-            chat.show_status(f"Unknown command: {cmd.command}", success=False)
-            chat.show_assistant_message("Type /help for available commands.", style="dim")
+            self._show_status(f"Unknown command: {cmd.command}", success=False)
+            self._show_assistant_message("Type /help for available commands.", style="dim")
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Handle worker state changes for error reporting."""
@@ -315,8 +423,7 @@ class LCRApp(App):
         if event.state == WorkerState.ERROR:
             self.log.error(f"Worker failed: {event.worker.error}")
             try:
-                chat = self.query_one("#chat", ChatArea)
-                chat.show_status(f"Command failed: {event.worker.error}", success=False)
+                self._show_status(f"Command failed: {event.worker.error}", success=False)
             except NoMatches:
                 pass  # Chat not mounted
 
@@ -326,28 +433,26 @@ class LCRApp(App):
 
     async def _handle_init(self, args: str) -> None:
         """Start the /init flow - shows first inline selector."""
-        chat = self.query_one("#chat", ChatArea)
-
         # Warn if trying to index home directory or root-level paths
         home = Path.home()
         if self.project_root == home or self.project_root in home.parents:
-            chat.show_status("Cannot initialize in home directory", success=False)
-            chat.show_assistant_message(
+            self._show_status("Cannot initialize in home directory", success=False)
+            self._show_assistant_message(
                 f"Current directory: {self.project_root}",
                 style="dim",
             )
-            chat.show_assistant_message(
+            self._show_assistant_message(
                 "Navigate to a project directory and run 'lcr' from there.",
                 style="yellow",
             )
             return
 
         if self.is_initialized and "--force" not in args:
-            chat.show_status("Already initialized", success=False)
-            chat.show_assistant_message("Use /init --force to reinitialize.", style="dim")
+            self._show_status("Already initialized", success=False)
+            self._show_assistant_message("Use /init --force to reinitialize.", style="dim")
             return
 
-        chat.show_assistant_message(f"Initializing lance-code-rag in {self.project_root}...")
+        self._show_assistant_message(f"Initializing lance-code-rag in {self.project_root}...")
 
         # Start init flow - step 1: select provider
         self._flow_state.flow = FlowType.INIT
@@ -356,19 +461,18 @@ class LCRApp(App):
 
     async def _handle_init_selection(self, value: str) -> None:
         """Handle selections during the /init flow."""
-        chat = self.query_one("#chat", ChatArea)
         step = self._flow_state.step
 
         if step == "provider":
             # Provider selected
             if value != "local":
-                chat.show_status(f"{value.title()} coming soon!", success=False)
-                chat.show_assistant_message("Only local embeddings are available currently.")
+                self._show_status(f"{value.title()} coming soon!", success=False)
+                self._show_assistant_message("Only local embeddings are available currently.")
                 await self._switch_to_input()
                 self._flow_state.reset()
                 return
 
-            chat.show_status(f"Provider: {value}")
+            self._show_status(f"Provider: {value}")
             self._flow_state.provider = value
 
             # Step 2: select model
@@ -385,13 +489,13 @@ class LCRApp(App):
             model_id = value
             model_info = next((m for m in LOCAL_MODELS if m[0] == model_id), None)
             if not model_info:
-                chat.show_status("Invalid model selection", success=False)
+                self._show_status("Invalid model selection", success=False)
                 await self._switch_to_input()
                 self._flow_state.reset()
                 return
 
             _, _, model_name, dimensions = model_info
-            chat.show_status(f"Model: {model_id}")
+            self._show_status(f"Model: {model_id}")
 
             # Restore input before continuing
             await self._switch_to_input()
@@ -413,10 +517,8 @@ class LCRApp(App):
         self, provider: Literal["local", "gemini", "openai"], model_name: str, dimensions: int
     ) -> None:
         """Complete the initialization after selections are made."""
-        chat = self.query_one("#chat", ChatArea)
-
         try:
-            chat.show_assistant_message("Creating config...")
+            self._show_assistant_message("Creating config...")
 
             # Create config
             config = LCRConfig(
@@ -444,22 +546,22 @@ class LCRApp(App):
             self._config = config
             self._manifest = manifest
 
-            chat.show_status("Config saved!")
+            self._show_status("Config saved!")
             self._update_status_bar()
 
             # Update welcome box
-            chat.update_welcome(
+            self._update_welcome_box(
                 config=config,
                 stats=manifest.stats,
                 is_initialized=True,
             )
 
             # Auto-index - @work decorator handles worker creation
-            chat.show_assistant_message("Starting initial indexing...")
+            self._show_assistant_message("Starting initial indexing...")
             self._run_indexing(force=False)
 
         except Exception as e:
-            chat.show_status(f"Initialization failed: {e}", success=False)
+            self._show_status(f"Initialization failed: {e}", success=False)
 
     def _update_mcp_config(self) -> None:
         """Add lance-code-rag to .mcp.json if not present."""
@@ -488,20 +590,19 @@ class LCRApp(App):
 
     async def _handle_search(self, query: str) -> None:
         """Handle /search command."""
-        chat = self.query_one("#chat", ChatArea)
         status_bar = self.query_one("#status", StatusBar)
 
         if not self.is_initialized:
-            chat.show_status("Not initialized", success=False)
-            chat.show_assistant_message("Run /init first.", style="dim")
+            self._show_status("Not initialized", success=False)
+            self._show_assistant_message("Run /init first.", style="dim")
             return
 
         if not query.strip():
-            chat.show_status("Usage: /search <query>", success=False)
+            self._show_status("Usage: /search <query>", success=False)
             return
 
         # Show user query
-        chat.show_user_query(query)
+        self._show_user_query(query)
 
         # Parse search options
         fuzzy = "--fuzzy" in query
@@ -520,10 +621,10 @@ class LCRApp(App):
             query = query.strip()
 
         if not query:
-            chat.show_status("Usage: /search <query>", success=False)
+            self._show_status("Usage: /search <query>", success=False)
             return
 
-        chat.show_assistant_message(f"Searching for: {query}...")
+        self._show_assistant_message(f"Searching for: {query}...")
         status_bar.set_searching()
 
         try:
@@ -534,21 +635,19 @@ class LCRApp(App):
                 fuzzy=fuzzy,
                 bm25_weight=bm25_weight,
             )
-            chat.show_search_results(results)
+            self._show_search_results(results)
         except SearchError as e:
-            chat.show_status(f"Search error: {e}", success=False)
+            self._show_status(f"Search error: {e}", success=False)
         except Exception as e:
-            chat.show_status(f"Error: {e}", success=False)
+            self._show_status(f"Error: {e}", success=False)
         finally:
             status_bar.set_ready()
 
     async def _handle_index(self, args: str) -> None:
         """Handle /index command."""
-        chat = self.query_one("#chat", ChatArea)
-
         if not self.is_initialized:
-            chat.show_status("Not initialized", success=False)
-            chat.show_assistant_message("Run /init first.", style="dim")
+            self._show_status("Not initialized", success=False)
+            self._show_assistant_message("Run /init first.", style="dim")
             return
 
         # Run indexing in a thread worker (Textual pattern for blocking I/O)
@@ -599,7 +698,6 @@ class LCRApp(App):
     def _on_indexing_started(self, mode: str) -> None:
         """Called from thread when indexing starts."""
         try:
-            chat = self.query_one("#chat", ChatArea)
             status_bar = self.query_one("#status", StatusBar)
         except NoMatches:
             return
@@ -607,25 +705,24 @@ class LCRApp(App):
         self.is_indexing = True
         status_bar.set_indexing(progress=0.0, current=0, total=0)
         # Simple message in chat - progress updates go to status bar
-        chat.start_indexing(f"Indexing started ({mode})")
+        self._start_indexing_message(f"Indexing started ({mode})")
 
     def _on_indexing_complete(self, stats: IndexStats) -> None:
         """Called from thread when indexing completes successfully."""
         try:
-            chat = self.query_one("#chat", ChatArea)
             status_bar = self.query_one("#status", StatusBar)
         except NoMatches:
             return
 
         # Silent completion - just update status bar (no chat message)
-        chat.finish_indexing(success=True)
+        self._finish_indexing_message(success=True)
 
         # Reload manifest and update displays
         self._manifest = load_manifest(self.project_root)
         self._update_status_bar()
 
         # Update welcome box with new file count
-        chat.update_welcome(
+        self._update_welcome_box(
             config=self._config,
             stats=self._manifest.stats if self._manifest else None,
             is_initialized=True,
@@ -637,12 +734,11 @@ class LCRApp(App):
     def _on_indexing_error(self, error_msg: str) -> None:
         """Called from thread when indexing fails."""
         try:
-            chat = self.query_one("#chat", ChatArea)
             status_bar = self.query_one("#status", StatusBar)
         except NoMatches:
             return
 
-        chat.finish_indexing(success=False, message=f"Indexing failed: {error_msg}")
+        self._finish_indexing_message(success=False, message=f"Indexing failed: {error_msg}")
         self.is_indexing = False
         status_bar.set_ready()
 
@@ -658,11 +754,9 @@ class LCRApp(App):
 
     async def _handle_status(self, args: str) -> None:
         """Handle /status command."""
-        chat = self.query_one("#chat", ChatArea)
-
         if not self.is_initialized:
-            chat.show_status("Not initialized", success=False)
-            chat.show_assistant_message("Run /init to set up.", style="dim")
+            self._show_status("Not initialized", success=False)
+            self._show_assistant_message("Run /init to set up.", style="dim")
             return
 
         # Build status table
@@ -683,22 +777,18 @@ class LCRApp(App):
         table.add_row("Status", "[green]Ready[/green]")
 
         from rich.panel import Panel
-        from textual.widgets import Static
 
-        chat.mount(Static(Panel(table, title="Index Status", border_style="green")))
-        chat.scroll_end()
+        self._mount_message(Static(Panel(table, title="Index Status", border_style="green")))
 
     async def _handle_clean(self, args: str) -> None:
         """Handle /clean command."""
-        chat = self.query_one("#chat", ChatArea)
-
         if not self.is_initialized:
-            chat.show_status("Nothing to clean - not initialized", success=False)
+            self._show_status("Nothing to clean - not initialized", success=False)
             return
 
         if "--confirm" not in args:
-            chat.show_status("This will remove all index data", success=False)
-            chat.show_assistant_message("Run /clean --confirm to proceed.", style="dim")
+            self._show_status("This will remove all index data", success=False)
+            self._show_assistant_message("Run /clean --confirm to proceed.", style="dim")
             return
 
         try:
@@ -709,11 +799,11 @@ class LCRApp(App):
             self._manifest = None
             self._search_engine = None
 
-            chat.show_status("Cleaned successfully!")
+            self._show_status("Cleaned successfully!")
             self._update_status_bar()
 
         except Exception as e:
-            chat.show_status(f"Clean failed: {e}", success=False)
+            self._show_status(f"Clean failed: {e}", success=False)
 
     # ─────────────────────────────────────────────────────────────────────
     # /remove Flow (single-step inline selection)
@@ -721,13 +811,11 @@ class LCRApp(App):
 
     async def _handle_remove(self, args: str) -> None:
         """Start the /remove flow - shows confirmation selector."""
-        chat = self.query_one("#chat", ChatArea)
-
         if not self.is_initialized:
-            chat.show_status("Not initialized - nothing to remove", success=False)
+            self._show_status("Not initialized - nothing to remove", success=False)
             return
 
-        chat.show_assistant_message("Remove lance-code-rag from this project?")
+        self._show_assistant_message("Remove lance-code-rag from this project?")
 
         # Start remove flow
         self._flow_state.flow = FlowType.REMOVE
@@ -741,34 +829,32 @@ class LCRApp(App):
 
     async def _handle_remove_selection(self, value: str) -> None:
         """Handle selection during the /remove flow."""
-        chat = self.query_one("#chat", ChatArea)
-
         # Restore input first
         await self._switch_to_input()
         self._flow_state.reset()
 
         if value != "yes":
-            chat.show_status("Removal cancelled", success=False)
+            self._show_status("Removal cancelled", success=False)
             return
 
         # Execute removal with progress
         try:
             # 1. Remove .lance-code-rag/ directory
-            chat.show_assistant_message("Removing .lance-code-rag/ directory...")
+            self._show_assistant_message("Removing .lance-code-rag/ directory...")
             lcr_dir = get_lcr_dir(self.project_root)
             if lcr_dir.exists():
                 shutil.rmtree(lcr_dir)
-            chat.show_status("Directory removed!")
+            self._show_status("Directory removed!")
 
             # 2. Remove from .gitignore
-            chat.show_assistant_message("Cleaning .gitignore...")
+            self._show_assistant_message("Cleaning .gitignore...")
             self._remove_gitignore_entry()
-            chat.show_status("Gitignore cleaned!")
+            self._show_status("Gitignore cleaned!")
 
             # 3. Remove from .mcp.json
-            chat.show_assistant_message("Cleaning .mcp.json...")
+            self._show_assistant_message("Cleaning .mcp.json...")
             self._remove_mcp_config()
-            chat.show_status("MCP config cleaned!")
+            self._show_status("MCP config cleaned!")
 
             # Reset state
             self.is_initialized = False
@@ -776,14 +862,14 @@ class LCRApp(App):
             self._manifest = None
             self._search_engine = None
 
-            chat.show_status("Removal complete!", success=True)
+            self._show_status("Removal complete!", success=True)
             self._update_status_bar()
 
             # Show not-initialized welcome
-            await chat.show_welcome(is_initialized=False)
+            await self._show_welcome_box(is_initialized=False)
 
         except Exception as e:
-            chat.show_status(f"Removal failed: {e}", success=False)
+            self._show_status(f"Removal failed: {e}", success=False)
 
     def _remove_gitignore_entry(self) -> None:
         """Remove .lance-code-rag from .gitignore."""
@@ -833,14 +919,12 @@ class LCRApp(App):
         """Handle /terminal-setup command - configure VS Code for Shift+Enter."""
         import os
 
-        chat = self.query_one("#chat", ChatArea)
-
         # Check if running in VS Code
         is_vscode = os.environ.get("TERM_PROGRAM") == "vscode"
 
         if not is_vscode:
-            chat.show_status("Not running in VS Code terminal", success=False)
-            chat.show_assistant_message(
+            self._show_status("Not running in VS Code terminal", success=False)
+            self._show_assistant_message(
                 "This command configures VS Code for Shift+Enter. "
                 "In other terminals, use Alt+Enter or Ctrl+J for newlines.",
                 style="dim",
@@ -889,8 +973,8 @@ class LCRApp(App):
             )
 
             if already_configured:
-                chat.show_status("VS Code already configured for Shift+Enter!", success=True)
-                chat.show_assistant_message(
+                self._show_status("VS Code already configured for Shift+Enter!", success=True)
+                self._show_assistant_message(
                     "Restart VS Code terminal if Shift+Enter isn't working.",
                     style="dim",
                 )
@@ -902,38 +986,36 @@ class LCRApp(App):
             # Write back
             keybindings_path.write_text(json.dumps(keybindings, indent=2) + "\n")
 
-            chat.show_status("VS Code configured for Shift+Enter!", success=True)
-            chat.show_assistant_message(
+            self._show_status("VS Code configured for Shift+Enter!", success=True)
+            self._show_assistant_message(
                 f"Added keybinding to {keybindings_path}",
                 style="dim",
             )
-            chat.show_assistant_message(
+            self._show_assistant_message(
                 "Restart the VS Code terminal for changes to take effect.",
                 style="yellow",
             )
 
         except PermissionError:
-            chat.show_status("Permission denied", success=False)
-            chat.show_assistant_message(
+            self._show_status("Permission denied", success=False)
+            self._show_assistant_message(
                 f"Cannot write to {keybindings_path}",
                 style="dim",
             )
         except json.JSONDecodeError as e:
-            chat.show_status("Invalid keybindings.json", success=False)
-            chat.show_assistant_message(
+            self._show_status("Invalid keybindings.json", success=False)
+            self._show_assistant_message(
                 f"Parse error: {e}. Please fix the file manually.",
                 style="dim",
             )
 
     async def _handle_help(self, args: str) -> None:
         """Handle /help command."""
-        chat = self.query_one("#chat", ChatArea)
-        chat.show_help()
+        self._show_help()
 
     async def _handle_clear(self, args: str) -> None:
         """Handle /clear command."""
-        chat = self.query_one("#chat", ChatArea)
-        chat.clear()
+        self._clear_chat()
         await self._show_welcome()
 
     async def _handle_quit(self, args: str) -> None:
@@ -1003,14 +1085,12 @@ class LCRApp(App):
 
     async def action_clear(self) -> None:
         """Clear the output."""
-        chat = self.query_one("#chat", ChatArea)
-        chat.clear()
+        self._clear_chat()
         await self._show_welcome()
 
     def action_help(self) -> None:
         """Show help."""
-        chat = self.query_one("#chat", ChatArea)
-        chat.show_help()
+        self._show_help()
 
 
 def run_app(project_root: Path | None = None) -> None:

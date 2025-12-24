@@ -66,13 +66,38 @@ def compose(self) -> ComposeResult:
 
 **Anti-pattern to avoid**:
 ```python
-# DON'T do this - wrapping creates layout issues
+# DON'T do this - subclassing VerticalScroll or wrapping creates layout issues
+class ChatArea(VerticalScroll):  # ← Don't subclass!
+    ...
+
 def compose(self) -> ComposeResult:
     with Vertical(id="main"):           # ← Extra wrapper!
-        yield ChatArea(...)
+        yield ChatArea(...)             # ← Subclassed widget!
         yield StatusBar(...)
         yield Container(id="bottom-app-container")
 ```
+
+**Correct pattern** (matching Elia - mount directly into VerticalScroll):
+```python
+def compose(self) -> ComposeResult:
+    # CRITICAL: can_focus=False allows mouse wheel scrolling without focus stealing
+    chat = VerticalScroll(id="chat")
+    chat.can_focus = False  # ← THIS IS ESSENTIAL FOR MOUSE SCROLLING
+    yield chat
+    yield StatusBar(...)
+    yield Container(id="bottom-app-container")
+
+# Then mount widgets directly into VerticalScroll:
+chat = self.query_one("#chat", VerticalScroll)
+chat.mount(widget)
+chat.scroll_end()
+```
+
+**Critical Requirements for Mouse Scrolling**:
+1. `can_focus = False` on VerticalScroll - allows mouse wheel events to work without focus stealing
+2. Do NOT wrap widgets in a `Static` inside `VerticalScroll` - creates nested scroll areas
+3. All child widgets MUST have `height: auto` in CSS - allows natural content flow
+4. All child widgets MUST have `width: 100%` in CSS - fills parent container
 
 The extra `Vertical(id="main")` wrapper can cause:
 - Improper screen filling

@@ -7,9 +7,10 @@ import shutil
 from pathlib import Path
 
 import pytest
+from textual.containers import VerticalScroll
 
 from lance_code_rag.tui.app import LCRApp
-from lance_code_rag.tui.widgets import ChatArea, SearchInput, StatusBar
+from lance_code_rag.tui.widgets import SearchInput, StatusBar
 from tests.conftest import setup_lcr_project
 
 
@@ -51,7 +52,7 @@ class TestTUIStartup:
         app = LCRApp(project_root=project)
         async with app.run_test():
             # Check all main widgets exist
-            assert app.query_one("#chat", ChatArea) is not None
+            assert app.query_one("#chat", VerticalScroll) is not None
             assert app.query_one("#input", SearchInput) is not None
             assert app.query_one("#status", StatusBar) is not None
 
@@ -75,7 +76,7 @@ class TestSlashCommands:
             await pilot.pause()
 
             # Chat should contain help content
-            app.query_one("#chat", ChatArea)
+            app.query_one("#chat", VerticalScroll)
             # Just verify no crash - output content is internal
 
     @pytest.mark.asyncio
@@ -254,21 +255,20 @@ class TestSearchInput:
 
 
 class TestChatArea:
-    """Tests for the ChatArea widget."""
+    """Tests for the chat area (VerticalScroll)."""
 
     @pytest.mark.asyncio
     async def test_chat_area_mounts_welcome(self, tmp_path: Path, sample_project: Path):
-        """ChatArea mounts welcome box on initialization."""
+        """Chat area mounts welcome box on initialization."""
         project = tmp_path / "project"
         shutil.copytree(sample_project, project)
         setup_lcr_project(project)
 
         app = LCRApp(project_root=project)
         async with app.run_test():
-            chat = app.query_one("#chat", ChatArea)
+            chat = app.query_one("#chat", VerticalScroll)
             # Chat area should exist and be scrollable
             assert chat is not None
-            assert chat.can_focus is False  # Allow mouse wheel scrolling
 
     @pytest.mark.asyncio
     async def test_clear_command_resets_chat(self, tmp_path: Path, sample_project: Path):

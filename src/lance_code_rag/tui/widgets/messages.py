@@ -193,11 +193,16 @@ class CodePreview(Static):
 
 
 class SearchResultsDisplay(Static):
-    """Container for displaying all search results."""
+    """Container for displaying all search results.
+
+    Note: Uses compose() to yield child widgets. Must set overflow: hidden
+    to prevent a nested scrollbar (since compose() makes this a container).
+    """
 
     DEFAULT_CSS = """
     SearchResultsDisplay {
         padding: 0 2;
+        overflow: hidden hidden;
     }
     """
 

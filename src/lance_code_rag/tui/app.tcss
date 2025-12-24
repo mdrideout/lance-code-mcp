@@ -1,15 +1,25 @@
-/* Lance Code RAG TUI Styles - Mistral Vibe Style */
+/* Lance Code RAG TUI Styles - Anatomy Pattern */
 
 Screen {
+    layout: vertical;
+    overflow: hidden;         /* CRITICAL: Never scroll the screen itself */
     background: $surface;
-    /* Widgets are direct children of Screen - no wrapper container */
 }
 
-/* Chat area - scrollable message flow (takes remaining space) */
+/* Chat area - Row 1 takes all remaining space */
 #chat {
     height: 1fr;
-    padding: 1 0;
-    /* No border - clean look */
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    scrollbar-size-vertical: 1;
+}
+
+/* Bottom container - Row 2 fits content naturally */
+#bottom-container {
+    height: auto;
+    width: 100%;
+    background: $surface;     /* Ensure opacity */
 }
 
 /* Status bar at bottom */
@@ -22,6 +32,7 @@ Screen {
 /* Input area container at bottom */
 #input-area {
     height: auto;
+    width: 100%;
 }
 
 /* Search input */
@@ -29,47 +40,65 @@ Screen {
     height: auto;
 }
 
-/* Welcome box */
+/* Welcome box - all widgets use height: auto to flow naturally */
 WelcomeBox {
+    height: auto;
+    width: 100%;
     margin: 0 0 1 0;
 }
 
-/* Message styling */
+/* Message styling - ALL use height: auto (Mistral Vibe pattern) */
 UserQuery {
+    height: auto;
+    width: 100%;
     margin: 1 0 0 0;
     padding: 0 2;
 }
 
 AssistantMessage {
+    height: auto;
+    width: 100%;
     padding: 0 2;
 }
 
 StatusMessage {
+    height: auto;
+    width: 100%;
     margin: 0 0 1 0;
     padding: 0 2;
 }
 
-/* Search results */
+/* Search results - height: auto ensures no nested scroll */
 SearchResultItem {
+    height: auto;
+    width: 100%;
     margin: 0 0 0 2;
 }
 
 CodePreview {
+    height: auto;
+    width: 100%;
     margin: 0 2 1 4;
 }
 
 SearchResultsDisplay {
+    height: auto;
+    width: 100%;
     padding: 0 2;
 }
 
 /* Help display */
 HelpDisplay {
+    height: auto;
+    width: 100%;
     margin: 1 0;
     padding: 0 2;
 }
 
 /* Indexing progress */
 IndexingProgress {
+    height: auto;
+    width: 100%;
     margin: 0 0 1 0;
     padding: 0 2;
 }

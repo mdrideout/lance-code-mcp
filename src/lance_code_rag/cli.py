@@ -9,7 +9,12 @@ from . import __version__
 
 @click.command()
 @click.version_option(version=__version__, prog_name="lcr")
-def main() -> None:
+@click.option(
+    "--minimal",
+    is_flag=True,
+    help="Use minimal TUI (experimental - for testing scroll behavior)",
+)
+def main(minimal: bool) -> None:
     """Lance Code RAG - Semantic code search via MCP.
 
     Launches the interactive TUI. Use slash commands inside:
@@ -20,9 +25,14 @@ def main() -> None:
         /status   Show index status
         /help     Show all commands
     """
-    from .tui.app import run_app
+    if minimal:
+        from .tui.minimal import run_minimal
 
-    run_app(Path.cwd())
+        run_minimal(Path.cwd())
+    else:
+        from .tui.app import run_app
+
+        run_app(Path.cwd())
 
 
 if __name__ == "__main__":

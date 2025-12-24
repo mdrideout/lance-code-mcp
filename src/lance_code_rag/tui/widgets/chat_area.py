@@ -11,7 +11,6 @@ from ...search import SearchResults
 from .messages import (
     AssistantMessage,
     HelpDisplay,
-    IndexingProgress,
     SearchResultsDisplay,
     StatusMessage,
     UserQuery,
@@ -139,44 +138,31 @@ class ChatArea(VerticalScroll):
         self.mount(HelpDisplay())
         self.scroll_end()
 
-    def start_indexing(self, message: str = "Indexing...") -> None:
-        """Show indexing progress indicator.
+    def start_indexing(self, message: str = "Indexing started") -> None:
+        """Show simple indexing started message.
+
+        Progress updates are shown in the status bar, not the chat area.
 
         Args:
-            message: Initial message to display
+            message: Message to display
         """
-        indexing = IndexingProgress(message, id="indexing")
-        self.mount(indexing)
+        self.mount(StatusMessage(message, success=True))
         self.scroll_end()
 
-    def update_indexing(self, progress: float, message: str | None = None) -> None:
-        """Update indexing progress.
+    def finish_indexing(self, success: bool = True, message: str | None = None) -> None:
+        """Complete indexing silently on success, show error on failure.
 
-        Args:
-            progress: Progress value (0.0 to 1.0)
-            message: Optional new message
-        """
-        try:
-            indexing = self.query_one("#indexing", IndexingProgress)
-            indexing.update_progress(progress, message)
-        except NoMatches:
-            pass  # Indexing widget not shown
-
-    def finish_indexing(self, success: bool = True, message: str = "Indexing complete") -> None:
-        """Complete indexing and show result.
+        On success: Silent - status bar already shows Ready.
+        On failure: Show error message in chat.
 
         Args:
             success: Whether indexing succeeded
-            message: Completion message
+            message: Error message (only shown on failure)
         """
-        try:
-            indexing = self.query_one("#indexing", IndexingProgress)
-            indexing.remove()
-        except NoMatches:
-            pass  # Already removed
-
-        self.mount(StatusMessage(message, success=success))
-        self.scroll_end()
+        # Only show message on error
+        if not success and message:
+            self.mount(StatusMessage(message, success=False))
+            self.scroll_end()
 
     def clear(self) -> None:
         """Clear all content and re-show welcome box."""

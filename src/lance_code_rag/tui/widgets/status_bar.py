@@ -36,6 +36,8 @@ class StatusBar(Static):
         self._file_count: int | None = None
         self._is_initialized = False
         self._indexing_progress: float | None = None
+        self._indexing_current: int = 0
+        self._indexing_total: int = 0
 
     def update(
         self,
@@ -79,15 +81,24 @@ class StatusBar(Static):
         self._status_style = "cyan"
         self.refresh()
 
-    def set_indexing(self, progress: float = 0.0) -> None:
-        """Set status to indexing state.
+    def set_indexing(
+        self,
+        progress: float = 0.0,
+        current: int = 0,
+        total: int = 0,
+    ) -> None:
+        """Set status to indexing state with file counts.
 
         Args:
             progress: Indexing progress (0.0 to 1.0)
+            current: Current file number being processed
+            total: Total files to process
         """
-        self._status = "Indexing..."
+        self._status = "Indexing"
         self._status_style = "yellow"
         self._indexing_progress = progress
+        self._indexing_current = current
+        self._indexing_total = total
         self.refresh()
 
     def set_not_initialized(self) -> None:
@@ -115,7 +126,14 @@ class StatusBar(Static):
         left.append(": ", style="dim")
         if self._indexing_progress is not None:
             pct = f" {self._indexing_progress * 100:.0f}%"
-            left.append(self._status + pct, style=self._status_style)
+            # Show file counts: "Indexing 37% (15/40 files)"
+            if self._indexing_total > 0:
+                left.append(
+                    f"{self._status}{pct} ({self._indexing_current}/{self._indexing_total} files)",
+                    style=self._status_style,
+                )
+            else:
+                left.append(self._status + pct, style=self._status_style)
         else:
             left.append(self._status, style=self._status_style)
 

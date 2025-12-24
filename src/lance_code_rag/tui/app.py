@@ -570,16 +570,22 @@ class LCRApp(App):
         mode = "full re-index" if force else "incremental index"
         self.call_from_thread(self._on_indexing_started, mode)
 
+        # Create progress callback that safely updates UI from thread
+        def progress_callback(current: int, total: int, stage: str) -> None:
+            if not worker.is_cancelled:
+                self.call_from_thread(self._on_indexing_progress, current, total, stage)
+
         try:
             # Create a null console to prevent Rich from interfering with Textual
             null_console = Console(force_terminal=False, no_color=True, quiet=True)
 
-            # Run the blocking indexing operation
+            # Run the blocking indexing operation with progress callback
             stats = run_index(
                 self.project_root,
                 force=force,
                 verbose=False,
                 console=null_console,
+                progress_callback=progress_callback,
             )
 
             # Check if cancelled before updating UI
@@ -599,8 +605,9 @@ class LCRApp(App):
             return
 
         self.is_indexing = True
-        status_bar.set_indexing(0.0)
-        chat.start_indexing(f"Starting {mode} of {self.project_root}...")
+        status_bar.set_indexing(progress=0.0, current=0, total=0)
+        # Simple message in chat - progress updates go to status bar
+        chat.start_indexing(f"Indexing started ({mode})")
 
     def _on_indexing_complete(self, stats: IndexStats) -> None:
         """Called from thread when indexing completes successfully."""
@@ -610,10 +617,8 @@ class LCRApp(App):
         except NoMatches:
             return
 
-        chat.finish_indexing(
-            success=True,
-            message=f"Indexed {stats.files_scanned} files, {stats.chunks_added} chunks",
-        )
+        # Silent completion - just update status bar (no chat message)
+        chat.finish_indexing(success=True)
 
         # Reload manifest and update displays
         self._manifest = load_manifest(self.project_root)
@@ -640,6 +645,16 @@ class LCRApp(App):
         chat.finish_indexing(success=False, message=f"Indexing failed: {error_msg}")
         self.is_indexing = False
         status_bar.set_ready()
+
+    def _on_indexing_progress(self, current: int, total: int, stage: str) -> None:
+        """Called from thread to update indexing progress."""
+        try:
+            status_bar = self.query_one("#status", StatusBar)
+        except NoMatches:
+            return
+
+        progress = current / total if total > 0 else 0.0
+        status_bar.set_indexing(progress=progress, current=current, total=total)
 
     async def _handle_status(self, args: str) -> None:
         """Handle /status command."""

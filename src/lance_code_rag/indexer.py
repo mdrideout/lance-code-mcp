@@ -1,11 +1,16 @@
 """Indexing pipeline orchestration for Lance Code RAG."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from rich.console import Console
+
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+# Progress callback signature: (current_file_index, total_files, stage)
+ProgressCallback = Callable[[int, int, str], None]
 
 from .chunker import Chunk, Chunker
 from .config import LCRConfig, load_config
@@ -70,12 +75,17 @@ class Indexer:
             self._chunker = Chunker()
         return self._chunker
 
-    def index(self, force: bool = False) -> IndexStats:
+    def index(
+        self,
+        force: bool = False,
+        progress_callback: ProgressCallback | None = None,
+    ) -> IndexStats:
         """
         Run the indexing pipeline.
 
         Args:
             force: If True, rebuild entire index ignoring existing state
+            progress_callback: Optional callback for progress updates (current, total, stage)
 
         Returns:
             IndexStats with counts of processed files and chunks
@@ -119,13 +129,22 @@ class Indexer:
             # Process new and modified files
             files_to_process = diff.new + diff.modified
             if files_to_process:
-                task = progress.add_task("Indexing files...", total=len(files_to_process))
-                for filepath in files_to_process:
+                total_files = len(files_to_process)
+                task = progress.add_task("Indexing files...", total=total_files)
+                for i, filepath in enumerate(files_to_process):
+                    # Report progress before processing each file
+                    if progress_callback:
+                        progress_callback(i, total_files, "indexing")
+
                     chunks_added, computed, cached = self._process_file(filepath)
                     stats.chunks_added += chunks_added
                     stats.embeddings_computed += computed
                     stats.embeddings_cached += cached
                     progress.update(task, advance=1)
+
+                # Report completion
+                if progress_callback:
+                    progress_callback(total_files, total_files, "complete")
 
         # Update manifest with new tree
         self._update_manifest(new_tree, stats)
@@ -321,17 +340,25 @@ def run_index(
     force: bool = False,
     verbose: bool = False,
     console: Console | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> IndexStats:
     """
     Run indexing with progress display.
 
     This is the main entry point called by the CLI.
+
+    Args:
+        project_root: Path to the project root
+        force: If True, rebuild entire index
+        verbose: If True, show detailed progress in terminal
+        console: Rich console for output
+        progress_callback: Optional callback for progress updates (current, total, stage)
     """
     console = console or Console()
     indexer = Indexer(project_root, verbose=verbose, console=console)
 
     try:
-        stats = indexer.index(force=force)
+        stats = indexer.index(force=force, progress_callback=progress_callback)
         return stats
     finally:
         indexer.close()
